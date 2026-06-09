@@ -1,0 +1,449 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Atlas — Scientific Chatbot</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg: #0f1117;
+      --surface: #1a1d27;
+      --surface2: #22263a;
+      --accent: #4f8ef7;
+      --accent2: #7c3aed;
+      --text: #e2e8f0;
+      --text-muted: #8892a4;
+      --border: #2d3148;
+      --user-bubble: #1d3a6b;
+      --bot-bubble: #1a1d27;
+      --source-bg: #111827;
+      --badge-pubmed: #0ea5e9;
+      --badge-arxiv: #f59e0b;
+      --radius: 12px;
+    }
+
+    body {
+      font-family: 'Segoe UI', system-ui, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      height: 100dvh;
+      display: flex;
+      flex-direction: column;
+    }
+
+    /* ── Header ── */
+    header {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 14px 20px;
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      flex-shrink: 0;
+    }
+    header .logo {
+      width: 34px; height: 34px;
+      background: linear-gradient(135deg, var(--accent), var(--accent2));
+      border-radius: 8px;
+      display: flex; align-items: center; justify-content: center;
+      font-weight: 700; font-size: 16px;
+    }
+    header h1 { font-size: 18px; font-weight: 600; }
+    header .sub { font-size: 12px; color: var(--text-muted); margin-left: 2px; }
+    header .model-wrap { margin-left: auto; display: flex; align-items: center; gap: 8px; }
+    header label { font-size: 12px; color: var(--text-muted); }
+    header select {
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      color: var(--text);
+      padding: 5px 10px;
+      border-radius: 6px;
+      font-size: 13px;
+      cursor: pointer;
+    }
+    header select:focus { outline: none; border-color: var(--accent); }
+
+    /* ── Chat area ── */
+    #chat {
+      flex: 1;
+      overflow-y: auto;
+      padding: 24px 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 24px;
+    }
+
+    /* Welcome banner */
+    .welcome {
+      text-align: center;
+      padding: 48px 20px;
+      color: var(--text-muted);
+    }
+    .welcome .icon { font-size: 48px; margin-bottom: 16px; }
+    .welcome h2 { font-size: 22px; color: var(--text); margin-bottom: 8px; }
+    .welcome p { font-size: 14px; max-width: 460px; margin: 0 auto; line-height: 1.6; }
+    .welcome .sources-list {
+      display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; margin-top: 16px;
+    }
+    .welcome .src-tag {
+      background: var(--surface2); border: 1px solid var(--border);
+      padding: 3px 10px; border-radius: 999px; font-size: 12px;
+    }
+
+    /* Message rows */
+    .msg-row { display: flex; gap: 10px; max-width: 860px; width: 100%; margin: 0 auto; }
+    .msg-row.user { flex-direction: row-reverse; }
+
+    .avatar {
+      width: 32px; height: 32px; border-radius: 50%; flex-shrink: 0;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 14px; font-weight: 700;
+    }
+    .avatar.user { background: var(--accent); }
+    .avatar.bot { background: linear-gradient(135deg, var(--accent), var(--accent2)); }
+
+    .bubble {
+      padding: 12px 16px;
+      border-radius: var(--radius);
+      font-size: 14px;
+      line-height: 1.7;
+      max-width: calc(100% - 44px);
+    }
+    .user .bubble {
+      background: var(--user-bubble);
+      border-bottom-right-radius: 4px;
+    }
+    .bot .bubble {
+      background: var(--bot-bubble);
+      border: 1px solid var(--border);
+      border-bottom-left-radius: 4px;
+    }
+
+    /* Sources accordion */
+    .sources-section { margin-top: 12px; }
+    .sources-toggle {
+      background: none; border: 1px solid var(--border);
+      color: var(--text-muted); padding: 6px 12px;
+      border-radius: 6px; font-size: 12px; cursor: pointer;
+      display: flex; align-items: center; gap: 6px;
+      transition: background 0.15s;
+    }
+    .sources-toggle:hover { background: var(--surface2); color: var(--text); }
+    .sources-toggle .arrow { transition: transform 0.2s; }
+    .sources-toggle.open .arrow { transform: rotate(90deg); }
+
+    .sources-list-inner {
+      margin-top: 8px;
+      display: none;
+      flex-direction: column;
+      gap: 8px;
+    }
+    .sources-list-inner.open { display: flex; }
+
+    .source-card {
+      background: var(--source-bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 10px 14px;
+      font-size: 12px;
+    }
+    .source-card .src-header {
+      display: flex; align-items: flex-start; gap: 8px; margin-bottom: 4px;
+    }
+    .badge {
+      flex-shrink: 0;
+      padding: 2px 8px; border-radius: 999px;
+      font-size: 10px; font-weight: 600; text-transform: uppercase;
+    }
+    .badge.pubmed { background: var(--badge-pubmed); color: #fff; }
+    .badge.arxiv { background: var(--badge-arxiv); color: #000; }
+    .source-card .title { font-weight: 600; color: var(--text); line-height: 1.4; }
+    .source-card .meta { color: var(--text-muted); margin-bottom: 6px; }
+    .source-card .abstract { color: #9aa5b4; line-height: 1.5; }
+    .source-card a {
+      color: var(--accent); text-decoration: none; font-size: 11px;
+      display: inline-block; margin-top: 6px;
+    }
+    .source-card a:hover { text-decoration: underline; }
+
+    /* Thinking indicator */
+    .thinking .bubble { display: flex; align-items: center; gap: 8px; color: var(--text-muted); }
+    .dots span {
+      display: inline-block; width: 6px; height: 6px;
+      background: var(--text-muted); border-radius: 50%;
+      animation: bounce 1.2s infinite;
+    }
+    .dots span:nth-child(2) { animation-delay: 0.2s; }
+    .dots span:nth-child(3) { animation-delay: 0.4s; }
+    @keyframes bounce {
+      0%, 80%, 100% { transform: translateY(0); }
+      40% { transform: translateY(-6px); }
+    }
+
+    /* ── Input bar ── */
+    #input-bar {
+      padding: 12px 16px 20px;
+      background: var(--bg);
+      border-top: 1px solid var(--border);
+      flex-shrink: 0;
+    }
+    .input-wrap {
+      max-width: 860px; margin: 0 auto;
+      display: flex; gap: 8px; align-items: flex-end;
+    }
+    textarea {
+      flex: 1;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      color: var(--text);
+      padding: 12px 14px;
+      border-radius: var(--radius);
+      font-size: 14px;
+      resize: none;
+      min-height: 48px;
+      max-height: 160px;
+      overflow-y: auto;
+      line-height: 1.5;
+      font-family: inherit;
+    }
+    textarea:focus { outline: none; border-color: var(--accent); }
+    textarea::placeholder { color: var(--text-muted); }
+    button#send-btn {
+      background: linear-gradient(135deg, var(--accent), var(--accent2));
+      border: none; color: #fff;
+      width: 48px; height: 48px;
+      border-radius: var(--radius);
+      cursor: pointer; font-size: 20px;
+      flex-shrink: 0;
+      transition: opacity 0.15s;
+    }
+    button#send-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+    button#send-btn:hover:not(:disabled) { opacity: 0.9; }
+    .hint { text-align: center; font-size: 11px; color: var(--text-muted); margin-top: 8px; max-width: 860px; margin-left: auto; margin-right: auto; }
+
+    /* Error */
+    .error-bubble {
+      color: #f87171; background: #2d1515;
+      border: 1px solid #7f1d1d;
+    }
+
+    /* Scrollbar */
+    ::-webkit-scrollbar { width: 6px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="logo">A</div>
+    <div>
+      <h1>Atlas</h1>
+      <div class="sub">Answers grounded in peer-reviewed science</div>
+    </div>
+    <div class="model-wrap">
+      <label for="model-select">Model</label>
+      <select id="model-select">
+        <option value="llama3">llama3</option>
+      </select>
+    </div>
+  </header>
+
+  <div id="chat">
+    <div class="welcome" id="welcome">
+      <div class="icon">🔬</div>
+      <h2>Ask a scientific question</h2>
+      <p>Atlas retrieves real papers from peer-reviewed sources and uses a local AI model to answer your question — citing only what the literature says.</p>
+      <div class="sources-list">
+        <span class="src-tag">PubMed / NCBI</span>
+        <span class="src-tag">arXiv</span>
+        <span class="src-tag">Nature</span>
+        <span class="src-tag">Science</span>
+        <span class="src-tag">NEJM</span>
+        <span class="src-tag">The Lancet</span>
+        <span class="src-tag">PNAS</span>
+      </div>
+    </div>
+  </div>
+
+  <div id="input-bar">
+    <div class="input-wrap">
+      <textarea id="question" rows="1" placeholder="Ask a scientific question…" maxlength="1000"></textarea>
+      <button id="send-btn" title="Send">&#x27A4;</button>
+    </div>
+    <div class="hint">Atlas answers only from retrieved scientific papers. Always verify primary sources.</div>
+  </div>
+
+  <script>
+    const chat = document.getElementById('chat');
+    const welcome = document.getElementById('welcome');
+    const textarea = document.getElementById('question');
+    const sendBtn = document.getElementById('send-btn');
+    const modelSelect = document.getElementById('model-select');
+
+    // Auto-resize textarea
+    textarea.addEventListener('input', () => {
+      textarea.style.height = 'auto';
+      textarea.style.height = Math.min(textarea.scrollHeight, 160) + 'px';
+    });
+
+    // Send on Enter (Shift+Enter for newline)
+    textarea.addEventListener('keydown', e => {
+      if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); }
+    });
+    sendBtn.addEventListener('click', sendMessage);
+
+    // Load available Ollama models
+    async function loadModels() {
+      try {
+        const res = await fetch('/models');
+        const data = await res.json();
+        if (data.models && data.models.length > 0) {
+          modelSelect.innerHTML = '';
+          data.models.forEach(m => {
+            const opt = document.createElement('option');
+            opt.value = m; opt.textContent = m;
+            modelSelect.appendChild(opt);
+          });
+        }
+      } catch (_) { /* keep default */ }
+    }
+    loadModels();
+
+    function escapeHtml(str) {
+      return str.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+    }
+
+    // Minimal markdown: bold, inline code, line breaks
+    function renderText(text) {
+      return escapeHtml(text)
+        .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+        .replace(/`(.+?)`/g, '<code>$1</code>')
+        .replace(/\n/g, '<br>');
+    }
+
+    function appendMessage(role, html, isHtml = false) {
+      welcome.style.display = 'none';
+      const row = document.createElement('div');
+      row.className = `msg-row ${role}`;
+
+      const avatar = document.createElement('div');
+      avatar.className = `avatar ${role}`;
+      avatar.textContent = role === 'user' ? 'U' : 'A';
+
+      const bubble = document.createElement('div');
+      bubble.className = 'bubble';
+      if (isHtml) bubble.innerHTML = html;
+      else bubble.textContent = html;
+
+      row.appendChild(avatar);
+      row.appendChild(bubble);
+      chat.appendChild(row);
+      chat.scrollTop = chat.scrollHeight;
+      return bubble;
+    }
+
+    function appendThinking() {
+      welcome.style.display = 'none';
+      const row = document.createElement('div');
+      row.className = 'msg-row bot thinking';
+      row.id = 'thinking-row';
+
+      const avatar = document.createElement('div');
+      avatar.className = 'avatar bot';
+      avatar.textContent = 'A';
+
+      const bubble = document.createElement('div');
+      bubble.className = 'bubble';
+      bubble.innerHTML = '<span>Searching papers…</span><span class="dots"><span></span><span></span><span></span></span>';
+
+      row.appendChild(avatar);
+      row.appendChild(bubble);
+      chat.appendChild(row);
+      chat.scrollTop = chat.scrollHeight;
+    }
+
+    function removeThinking() {
+      const el = document.getElementById('thinking-row');
+      if (el) el.remove();
+    }
+
+    function buildSourcesHtml(sources) {
+      if (!sources || sources.length === 0) return '';
+      const cards = sources.map((s, i) => {
+        const badge = s.source === 'PubMed'
+          ? '<span class="badge pubmed">PubMed</span>'
+          : '<span class="badge arxiv">arXiv</span>';
+        const authorsStr = s.authors && s.authors.length > 0
+          ? escapeHtml(s.authors.slice(0, 3).join(', ') + (s.authors.length > 3 ? ' et al.' : ''))
+          : 'Unknown authors';
+        const abstract = s.abstract ? `<div class="abstract">${escapeHtml(s.abstract.slice(0, 400))}${s.abstract.length > 400 ? '…' : ''}</div>` : '';
+        const doiLink = s.doi ? `<a href="${escapeHtml(s.doi)}" target="_blank" rel="noopener">DOI ↗</a>` : '';
+        return `
+          <div class="source-card">
+            <div class="src-header">
+              ${badge}
+              <div class="title">[${i+1}] ${escapeHtml(s.title)}</div>
+            </div>
+            <div class="meta">${escapeHtml(s.journal)}${s.year ? ' · ' + escapeHtml(s.year) : ''} · ${authorsStr}</div>
+            ${abstract}
+            <a href="${escapeHtml(s.url)}" target="_blank" rel="noopener">View paper ↗</a>
+            ${doiLink}
+          </div>`;
+      }).join('');
+
+      return `
+        <div class="sources-section">
+          <button class="sources-toggle" onclick="toggleSources(this)">
+            <span class="arrow">▶</span> ${sources.length} source${sources.length > 1 ? 's' : ''} retrieved
+          </button>
+          <div class="sources-list-inner">${cards}</div>
+        </div>`;
+    }
+
+    window.toggleSources = function(btn) {
+      btn.classList.toggle('open');
+      btn.nextElementSibling.classList.toggle('open');
+    };
+
+    async function sendMessage() {
+      const question = textarea.value.trim();
+      if (!question || sendBtn.disabled) return;
+
+      appendMessage('user', question);
+      textarea.value = '';
+      textarea.style.height = 'auto';
+      sendBtn.disabled = true;
+      appendThinking();
+
+      try {
+        const res = await fetch('/chat', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ question, model: modelSelect.value }),
+        });
+
+        removeThinking();
+
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({ detail: 'Unknown error' }));
+          appendMessage('bot', `<div class="error-bubble">⚠️ ${escapeHtml(err.detail || 'Request failed')}</div>`, true);
+          return;
+        }
+
+        const data = await res.json();
+        const answerHtml = renderText(data.answer);
+        const sourcesHtml = buildSourcesHtml(data.sources);
+        appendMessage('bot', answerHtml + sourcesHtml, true);
+      } catch (err) {
+        removeThinking();
+        appendMessage('bot', `<div class="error-bubble">⚠️ Network error: ${escapeHtml(err.message)}</div>`, true);
+      } finally {
+        sendBtn.disabled = false;
+        textarea.focus();
+      }
+    }
+  </script>
+</body>
+</html>
