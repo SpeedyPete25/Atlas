@@ -47,11 +47,34 @@ async def chat(request: ChatRequest):
     # Retrieve from both sources in parallel
     pubmed_task = search_pubmed(question, max_results=request.pubmed_results)
     arxiv_task = search_arxiv(question, max_results=request.arxiv_results)
-    pubmed_results, arxiv_results = await asyncio.gather(pubmed_task, arxiv_task)
+    pubmed_out, arxiv_out = await asyncio.gather(
+        pubmed_task,
+        arxiv_task,
+        return_exceptions=True,
+    )
+
+    source_errors = []
+    pubmed_results = []
+    arxiv_results = []
+
+    if isinstance(pubmed_out, Exception):
+        source_errors.append(f"PubMed retrieval failed: {pubmed_out}")
+    else:
+        pubmed_results = pubmed_out
+
+    if isinstance(arxiv_out, Exception):
+        source_errors.append(f"arXiv retrieval failed: {arxiv_out}")
+    else:
+        arxiv_results = arxiv_out
 
     sources = pubmed_results + arxiv_results
 
     if not sources:
+        if source_errors:
+            raise HTTPException(
+                status_code=502,
+                detail="; ".join(source_errors),
+            )
         return ChatResponse(
             answer=(
                 "No relevant scientific literature was found for your question. "

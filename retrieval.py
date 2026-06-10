@@ -4,7 +4,7 @@ from typing import List, Dict
 
 PUBMED_SEARCH = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi"
 PUBMED_FETCH = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi"
-ARXIV_SEARCH = "http://export.arxiv.org/api/query"
+ARXIV_SEARCH = "https://export.arxiv.org/api/query"
 
 # Priority journals requested by the user
 PRIORITY_JOURNALS = [
@@ -97,7 +97,7 @@ def _parse_pubmed_xml(xml_text: str) -> List[Dict]:
 
 async def search_arxiv(query: str, max_results: int = 4) -> List[Dict]:
     """Search arXiv and return a list of paper metadata dicts."""
-    async with httpx.AsyncClient(timeout=20) as client:
+    async with httpx.AsyncClient(timeout=20, follow_redirects=True) as client:
         resp = await client.get(ARXIV_SEARCH, params={
             "search_query": f"all:{query}",
             "start": 0,
