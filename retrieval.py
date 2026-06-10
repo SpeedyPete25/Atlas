@@ -1,15 +1,20 @@
 import httpx
 import xml.etree.ElementTree as ET
+import re
 from typing import List, Dict
 
 PUBMED_SEARCH = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi"
 PUBMED_FETCH = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi"
 ARXIV_SEARCH = "https://export.arxiv.org/api/query"
+PTABLE_COMPOUNDS = "https://ptable.com/JSON/compounds/"
 
 # Priority journals requested by the user
 PRIORITY_JOURNALS = [
     "Nature", "Science", "Proc Natl Acad Sci", "N Engl J Med", "Lancet"
 ]
+
+FORMULA_PATTERN = re.compile(r"\b(?:[A-Z][a-z]?\d*){2,}\b")
+SYMBOL_PATTERN = re.compile(r"([A-Z][a-z]?)\d*")
 
 
 async def search_pubmed(query: str, max_results: int = 5) -> List[Dict]:
@@ -158,3 +163,92 @@ def _parse_arxiv_xml(xml_text: str) -> List[Dict]:
             continue
 
     return results
+
+
+def _extract_formulas(query: str) -> List[str]:
+    formulas = []
+    seen = set()
+    for match in FORMULA_PATTERN.findall(query):
+        if match not in seen:
+            seen.add(match)
+            formulas.append(match)
+    return formulas
+
+
+def _symbols_signature(formula: str) -> str:
+    symbols = sorted(set(SYMBOL_PATTERN.findall(formula)))
+    return "".join(symbols)
+
+
+async def search_ptable(query: str, max_results: int = 3) -> List[Dict]:
+    """Search ptable compounds endpoint for formulas found in user query."""
+    formulas = _extract_formulas(query)
+    if not formulas:
+        return []
+
+    results = []
+    async with httpx.AsyncClient(timeout=20, follow_redirects=True) as client:
+        for formula in formulas[:3]:
+            signature = _symbols_signature(formula)
+            if not signature:
+                continue
+
+            try:
+                resp = await client.get(f"{PTABLE_COMPOUNDS}formula={signature}")
+                resp.raise_for_status()
+                payload = resp.json()
+            except Exception:
+                continue
+
+            matches = payload.get("matches", [])
+            if not matches:
+                continue
+
+            exact = next(
+                (m for m in matches if m.get("molecularformula", "") == formula),
+                None,
+            )
+            best = exact or matches[0]
+
+            name = ", ".join(best.get("allnames", [])[:3]) or "Unknown compound"
+            molecular = best.get("molecularformula", formula)
+            article = (best.get("articles") or [""])[0] or ""
+            wikipedia_url = (
+                f"https://en.wikipedia.org/wiki/{article.replace(' ', '_')}"
+                if article
+                else ""
+            )
+
+            abstract = (
+                f"Ptable compound match for formula {formula}. "
+                f"Closest cataloged compound: {molecular}. "
+                f"Names: {name}."
+            )
+
+            results.append({
+                "title": f"Ptable compound record: {molecular}",
+                "abstract": abstract,
+                "authors": ["Ptable"],
+                "journal": "Ptable (periodic table/compound index)",
+                "year": "",
+                "url": f"https://ptable.com/#Compounds?formula={formula}",
+                "doi": "",
+                "source": "Ptable",
+            })
+
+            if wikipedia_url:
+                results.append({
+                    "title": f"Wikipedia article for {molecular} (linked by Ptable)",
+                    "abstract": f"Reference page linked from Ptable for compound {molecular}.",
+                    "authors": ["Wikipedia"],
+                    "journal": "Wikipedia",
+                    "year": "",
+                    "url": wikipedia_url,
+                    "doi": "",
+                    "source": "Ptable",
+                })
+
+            if len(results) >= max_results:
+                break
+
+    return results[:max_results]

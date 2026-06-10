@@ -21,6 +21,7 @@
       --source-bg: #111827;
       --badge-pubmed: #0ea5e9;
       --badge-arxiv: #f59e0b;
+      --badge-ptable: #22c55e;
       --radius: 12px;
     }
 
@@ -159,6 +160,7 @@
     }
     .badge.pubmed { background: var(--badge-pubmed); color: #fff; }
     .badge.arxiv { background: var(--badge-arxiv); color: #000; }
+    .badge.ptable { background: var(--badge-ptable); color: #06240f; }
     .source-card .title { font-weight: 600; color: var(--text); line-height: 1.4; }
     .source-card .meta { color: var(--text-muted); margin-bottom: 6px; }
     .source-card .abstract { color: #9aa5b4; line-height: 1.5; }
@@ -258,6 +260,7 @@
       <div class="sources-list">
         <span class="src-tag">PubMed / NCBI</span>
         <span class="src-tag">arXiv</span>
+        <span class="src-tag">Ptable</span>
         <span class="src-tag">Nature</span>
         <span class="src-tag">Science</span>
         <span class="src-tag">NEJM</span>
@@ -374,7 +377,9 @@
       const cards = sources.map((s, i) => {
         const badge = s.source === 'PubMed'
           ? '<span class="badge pubmed">PubMed</span>'
-          : '<span class="badge arxiv">arXiv</span>';
+          : s.source === 'arXiv'
+          ? '<span class="badge arxiv">arXiv</span>'
+          : '<span class="badge ptable">Ptable</span>';
         const authorsStr = s.authors && s.authors.length > 0
           ? escapeHtml(s.authors.slice(0, 3).join(', ') + (s.authors.length > 3 ? ' et al.' : ''))
           : 'Unknown authors';

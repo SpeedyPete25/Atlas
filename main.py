@@ -5,7 +5,7 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 from typing import List
 
-from retrieval import search_pubmed, search_arxiv
+from retrieval import search_pubmed, search_arxiv, search_ptable
 from llm import generate_answer, list_models
 
 app = FastAPI(title="Scientific Chatbot", version="1.0.0")
@@ -17,6 +17,7 @@ class ChatRequest(BaseModel):
     model: str = Field(default="llama3")
     pubmed_results: int = Field(default=4, ge=1, le=10)
     arxiv_results: int = Field(default=3, ge=0, le=10)
+    ptable_results: int = Field(default=2, ge=0, le=5)
 
 
 class Source(BaseModel):
@@ -47,15 +48,18 @@ async def chat(request: ChatRequest):
     # Retrieve from both sources in parallel
     pubmed_task = search_pubmed(question, max_results=request.pubmed_results)
     arxiv_task = search_arxiv(question, max_results=request.arxiv_results)
-    pubmed_out, arxiv_out = await asyncio.gather(
+    ptable_task = search_ptable(question, max_results=request.ptable_results)
+    pubmed_out, arxiv_out, ptable_out = await asyncio.gather(
         pubmed_task,
         arxiv_task,
+        ptable_task,
         return_exceptions=True,
     )
 
     source_errors = []
     pubmed_results = []
     arxiv_results = []
+    ptable_results = []
 
     if isinstance(pubmed_out, Exception):
         source_errors.append(f"PubMed retrieval failed: {pubmed_out}")
@@ -67,7 +71,12 @@ async def chat(request: ChatRequest):
     else:
         arxiv_results = arxiv_out
 
-    sources = pubmed_results + arxiv_results
+    if isinstance(ptable_out, Exception):
+        source_errors.append(f"Ptable retrieval failed: {ptable_out}")
+    else:
+        ptable_results = ptable_out
+
+    sources = pubmed_results + arxiv_results + ptable_results
 
     if not sources:
         if source_errors:
