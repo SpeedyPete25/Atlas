@@ -16,6 +16,29 @@ PRIORITY_JOURNALS = [
 FORMULA_PATTERN = re.compile(r"\b(?:[A-Z][a-z]?\d*){2,}\b")
 SYMBOL_PATTERN = re.compile(r"([A-Z][a-z]?)\d*")
 
+# Common chemistry names/aliases for name-only questions.
+COMPOUND_NAME_TO_FORMULA = {
+    "sodium carbonate": "Na2CO3",
+    "washing soda": "Na2CO3",
+    "sodium bicarbonate": "NaHCO3",
+    "baking soda": "NaHCO3",
+    "sodium chloride": "NaCl",
+    "table salt": "NaCl",
+    "water": "H2O",
+    "hydrogen peroxide": "H2O2",
+    "carbon dioxide": "CO2",
+    "carbon monoxide": "CO",
+    "methane": "CH4",
+    "ethanol": "C2H6O",
+    "glucose": "C6H12O6",
+    "sulfuric acid": "H2SO4",
+    "sulphuric acid": "H2SO4",
+    "hydrochloric acid": "HCl",
+    "nitric acid": "HNO3",
+    "acetic acid": "C2H4O2",
+    "ammonia": "NH3",
+}
+
 
 async def search_pubmed(query: str, max_results: int = 5) -> List[Dict]:
     """Search PubMed/NCBI and return a list of paper metadata dicts."""
@@ -175,6 +198,24 @@ def _extract_formulas(query: str) -> List[str]:
     return formulas
 
 
+def _normalize_query(text: str) -> str:
+    normalized = re.sub(r"[^a-z0-9\s-]", " ", text.lower())
+    normalized = re.sub(r"\s+", " ", normalized).strip()
+    return f" {normalized} "
+
+
+def _extract_named_formulas(query: str) -> List[str]:
+    normalized_query = _normalize_query(query)
+    formulas = []
+    seen = set()
+    for name, formula in COMPOUND_NAME_TO_FORMULA.items():
+        needle = f" {_normalize_query(name).strip()} "
+        if needle in normalized_query and formula not in seen:
+            seen.add(formula)
+            formulas.append(formula)
+    return formulas
+
+
 def _symbols_signature(formula: str) -> str:
     symbols = sorted(set(SYMBOL_PATTERN.findall(formula)))
     return "".join(symbols)
@@ -182,7 +223,13 @@ def _symbols_signature(formula: str) -> str:
 
 async def search_ptable(query: str, max_results: int = 3) -> List[Dict]:
     """Search ptable compounds endpoint for formulas found in user query."""
-    formulas = _extract_formulas(query)
+    formulas = []
+    seen = set()
+    for formula in _extract_formulas(query) + _extract_named_formulas(query):
+        if formula not in seen:
+            seen.add(formula)
+            formulas.append(formula)
+
     if not formulas:
         return []
 
