@@ -4,6 +4,22 @@ from typing import Awaitable, Callable, Dict, List, Tuple
 from sources import search_arxiv, search_ptable, search_pubmed
 
 
+# Contributor guide for new sources:
+# - Implement an async function with signature: search_<source>(query: str, max_results: int) -> List[Dict]
+# - Return a list of dictionaries with exactly these keys so the API and UI can render them consistently:
+#   {
+#       "title": str,
+#       "abstract": str,
+#       "authors": List[str],
+#       "journal": str,
+#       "year": str,
+#       "url": str,
+#       "doi": str,
+#       "source": str,
+#   }
+# - Then register the function once in SOURCE_DEFINITIONS below.
+
+
 @dataclass(frozen=True)
 class SourceDefinition:
     key: str
