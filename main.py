@@ -1,11 +1,15 @@
-import asyncio
 from fastapi import FastAPI, HTTPException
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
-from typing import List
+from typing import Dict, List
 
-from retrieval import search_pubmed, search_arxiv, search_ptable
+from retrieval import (
+    get_default_source_limits,
+    get_source_definitions,
+    normalize_source_limits,
+    search_all_sources,
+)
 from llm import generate_answer, list_models
 
 app = FastAPI(title="Scientific Chatbot", version="1.0.0")
@@ -15,9 +19,10 @@ app.mount("/static", StaticFiles(directory="static"), name="static")
 class ChatRequest(BaseModel):
     question: str = Field(..., min_length=3, max_length=1000)
     model: str = Field(default="llama3")
-    pubmed_results: int = Field(default=4, ge=1, le=10)
-    arxiv_results: int = Field(default=3, ge=0, le=10)
-    ptable_results: int = Field(default=2, ge=0, le=5)
+    source_limits: Dict[str, int] = Field(default_factory=get_default_source_limits)
+    pubmed_results: int | None = Field(default=None, ge=0, le=10)
+    arxiv_results: int | None = Field(default=None, ge=0, le=10)
+    ptable_results: int | None = Field(default=None, ge=0, le=10)
 
 
 class Source(BaseModel):
@@ -44,39 +49,20 @@ async def root():
 @app.post("/chat", response_model=ChatResponse)
 async def chat(request: ChatRequest):
     question = request.question.strip()
-
-    # Retrieve from both sources in parallel
-    pubmed_task = search_pubmed(question, max_results=request.pubmed_results)
-    arxiv_task = search_arxiv(question, max_results=request.arxiv_results)
-    ptable_task = search_ptable(question, max_results=request.ptable_results)
-    pubmed_out, arxiv_out, ptable_out = await asyncio.gather(
-        pubmed_task,
-        arxiv_task,
-        ptable_task,
-        return_exceptions=True,
-    )
-
-    source_errors = []
-    pubmed_results = []
-    arxiv_results = []
-    ptable_results = []
-
-    if isinstance(pubmed_out, Exception):
-        source_errors.append(f"PubMed retrieval failed: {pubmed_out}")
-    else:
-        pubmed_results = pubmed_out
-
-    if isinstance(arxiv_out, Exception):
-        source_errors.append(f"arXiv retrieval failed: {arxiv_out}")
-    else:
-        arxiv_results = arxiv_out
-
-    if isinstance(ptable_out, Exception):
-        source_errors.append(f"Ptable retrieval failed: {ptable_out}")
-    else:
-        ptable_results = ptable_out
-
-    sources = pubmed_results + arxiv_results + ptable_results
+    legacy_overrides = {
+        key: value
+        for key, value in {
+            "pubmed": request.pubmed_results,
+            "arxiv": request.arxiv_results,
+            "ptable": request.ptable_results,
+        }.items()
+        if value is not None
+    }
+    source_limits = normalize_source_limits({
+        **request.source_limits,
+        **legacy_overrides,
+    })
+    sources, source_errors = await search_all_sources(question, source_limits)
 
     if not sources:
         if source_errors:
@@ -101,6 +87,21 @@ async def chat(request: ChatRequest):
         )
 
     return ChatResponse(answer=answer, sources=sources)
+
+
+@app.get("/sources")
+async def get_sources():
+    definitions = get_source_definitions()
+    return {
+        "sources": [
+            {
+                "key": source.key,
+                "label": source.label,
+                "default_max_results": source.default_max_results,
+            }
+            for source in definitions.values()
+        ]
+    }
 
 
 @app.get("/models")
