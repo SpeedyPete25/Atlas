@@ -93,6 +93,49 @@
       padding: 3px 10px; border-radius: 999px; font-size: 12px;
     }
 
+    .source-controls {
+      max-width: 860px;
+      margin: 0 auto 12px;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      align-items: center;
+    }
+    .source-controls-label {
+      width: 100%;
+      font-size: 12px;
+      color: var(--text-muted);
+      margin-bottom: 2px;
+    }
+    .source-chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      padding: 6px 10px;
+      font-size: 12px;
+      color: var(--text);
+    }
+    .source-chip input {
+      accent-color: var(--accent);
+    }
+    .source-chip select {
+      background: transparent;
+      border: 0;
+      color: var(--text-muted);
+      font-size: 12px;
+      cursor: pointer;
+    }
+    .source-chip select:focus {
+      outline: none;
+      color: var(--text);
+    }
+    .source-chip.disabled {
+      opacity: 0.55;
+    }
+
     /* Message rows */
     .msg-row { display: flex; gap: 10px; max-width: 860px; width: 100%; margin: 0 auto; }
     .msg-row.user { flex-direction: row-reverse; }
@@ -257,20 +300,16 @@
       <div class="icon">🔬</div>
       <h2>Ask a scientific question</h2>
       <p>Atlas retrieves real papers from peer-reviewed sources and uses a local AI model to answer your question — citing only what the literature says.</p>
-      <div class="sources-list">
-        <span class="src-tag">PubMed / NCBI</span>
-        <span class="src-tag">arXiv</span>
-        <span class="src-tag">Ptable</span>
-        <span class="src-tag">Nature</span>
-        <span class="src-tag">Science</span>
-        <span class="src-tag">NEJM</span>
-        <span class="src-tag">The Lancet</span>
-        <span class="src-tag">PNAS</span>
+      <div class="sources-list" id="welcome-sources">
+        <span class="src-tag">Loading sources…</span>
       </div>
     </div>
   </div>
 
   <div id="input-bar">
+    <div class="source-controls" id="source-controls">
+      <div class="source-controls-label">Enabled verified sources</div>
+    </div>
     <div class="input-wrap">
       <textarea id="question" rows="1" placeholder="Ask a scientific question…" maxlength="1000"></textarea>
       <button id="send-btn" title="Send">&#x27A4;</button>
@@ -284,6 +323,9 @@
     const textarea = document.getElementById('question');
     const sendBtn = document.getElementById('send-btn');
     const modelSelect = document.getElementById('model-select');
+    const sourceControls = document.getElementById('source-controls');
+    const welcomeSources = document.getElementById('welcome-sources');
+    let availableSources = [];
 
     // Auto-resize textarea
     textarea.addEventListener('input', () => {
@@ -313,6 +355,104 @@
       } catch (_) { /* keep default */ }
     }
     loadModels();
+
+    function sourceKey(value) {
+      return String(value || '').toLowerCase().replace(/[^a-z0-9]+/g, '-');
+    }
+
+    function sourceBadgeStyle(sourceName) {
+      const styles = {
+        pubmed: 'background: var(--badge-pubmed); color: #fff;',
+        arxiv: 'background: var(--badge-arxiv); color: #000;',
+        ptable: 'background: var(--badge-ptable); color: #06240f;',
+      };
+      return styles[sourceKey(sourceName)] || 'background: var(--surface2); color: var(--text);';
+    }
+
+    function updateChipState(chip, enabled) {
+      chip.classList.toggle('disabled', !enabled);
+    }
+
+    function renderSourceControls(sources) {
+      availableSources = Array.isArray(sources) ? sources : [];
+      welcomeSources.innerHTML = '';
+
+      const label = sourceControls.querySelector('.source-controls-label');
+      sourceControls.innerHTML = '';
+      sourceControls.appendChild(label);
+
+      if (availableSources.length === 0) {
+        welcomeSources.innerHTML = '<span class="src-tag">No sources available</span>';
+        return;
+      }
+
+      availableSources.forEach(source => {
+        const tag = document.createElement('span');
+        tag.className = 'src-tag';
+        tag.textContent = source.label;
+        welcomeSources.appendChild(tag);
+
+        const chip = document.createElement('label');
+        chip.className = 'source-chip';
+        chip.dataset.sourceKey = source.key;
+
+        const checkbox = document.createElement('input');
+        checkbox.type = 'checkbox';
+        checkbox.checked = source.default_max_results > 0;
+
+        const name = document.createElement('span');
+        name.textContent = source.label;
+
+        const select = document.createElement('select');
+        for (let i = 0; i <= 10; i += 1) {
+          const option = document.createElement('option');
+          option.value = String(i);
+          option.textContent = i === 0 ? 'off' : `${i} hit${i === 1 ? '' : 's'}`;
+          if (i === source.default_max_results) option.selected = true;
+          select.appendChild(option);
+        }
+
+        checkbox.addEventListener('change', () => {
+          if (!checkbox.checked) select.value = '0';
+          else if (select.value === '0') select.value = String(Math.max(source.default_max_results, 1));
+          updateChipState(chip, checkbox.checked);
+        });
+
+        select.addEventListener('change', () => {
+          checkbox.checked = select.value !== '0';
+          updateChipState(chip, checkbox.checked);
+        });
+
+        chip.appendChild(checkbox);
+        chip.appendChild(name);
+        chip.appendChild(select);
+        updateChipState(chip, checkbox.checked);
+        sourceControls.appendChild(chip);
+      });
+    }
+
+    async function loadSources() {
+      try {
+        const res = await fetch('/sources');
+        const data = await res.json();
+        renderSourceControls(data.sources || []);
+      } catch (_) {
+        renderSourceControls([]);
+      }
+    }
+    loadSources();
+
+    function getSourceLimitsPayload() {
+      const limits = {};
+      sourceControls.querySelectorAll('.source-chip').forEach(chip => {
+        const key = chip.dataset.sourceKey;
+        const select = chip.querySelector('select');
+        if (key && select) {
+          limits[key] = Number(select.value || 0);
+        }
+      });
+      return limits;
+    }
 
     function escapeHtml(str) {
       return str.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
@@ -375,11 +515,7 @@
     function buildSourcesHtml(sources) {
       if (!sources || sources.length === 0) return '';
       const cards = sources.map((s, i) => {
-        const badge = s.source === 'PubMed'
-          ? '<span class="badge pubmed">PubMed</span>'
-          : s.source === 'arXiv'
-          ? '<span class="badge arxiv">arXiv</span>'
-          : '<span class="badge ptable">Ptable</span>';
+        const badge = `<span class="badge ${escapeHtml(sourceKey(s.source))}" style="${sourceBadgeStyle(s.source)}">${escapeHtml(s.source)}</span>`;
         const authorsStr = s.authors && s.authors.length > 0
           ? escapeHtml(s.authors.slice(0, 3).join(', ') + (s.authors.length > 3 ? ' et al.' : ''))
           : 'Unknown authors';
@@ -426,7 +562,11 @@
         const res = await fetch('/chat', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ question, model: modelSelect.value }),
+          body: JSON.stringify({
+            question,
+            model: modelSelect.value,
+            source_limits: getSourceLimitsPayload(),
+          }),
         });
 
         removeThinking();
