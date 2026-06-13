@@ -1,32 +1,52 @@
 import re
 from typing import Dict, List
+from urllib.parse import quote
 
 import httpx
 
 PTABLE_COMPOUNDS = "https://ptable.com/JSON/compounds/"
+PUBCHEM_NAME_TO_FORMULA = (
+    "https://pubchem.ncbi.nlm.nih.gov/rest/pug/compound/name/{}/property/MolecularFormula/JSON"
+)
 FORMULA_PATTERN = re.compile(r"\b(?:[A-Z][a-z]?\d*){2,}\b")
 SYMBOL_PATTERN = re.compile(r"([A-Z][a-z]?)\d*")
 
-COMPOUND_NAME_TO_FORMULA = {
-    "sodium carbonate": "Na2CO3",
+# Alias fallback for colloquial names PubChem may not always resolve reliably.
+COMPOUND_ALIASES = {
     "washing soda": "Na2CO3",
-    "sodium bicarbonate": "NaHCO3",
     "baking soda": "NaHCO3",
-    "sodium chloride": "NaCl",
     "table salt": "NaCl",
-    "water": "H2O",
-    "hydrogen peroxide": "H2O2",
-    "carbon dioxide": "CO2",
-    "carbon monoxide": "CO",
-    "methane": "CH4",
-    "ethanol": "C2H6O",
-    "glucose": "C6H12O6",
-    "sulfuric acid": "H2SO4",
-    "sulphuric acid": "H2SO4",
-    "hydrochloric acid": "HCl",
-    "nitric acid": "HNO3",
-    "acetic acid": "C2H4O2",
-    "ammonia": "NH3",
+}
+
+NAME_RESOLUTION_STOPWORDS = {
+    "a",
+    "an",
+    "and",
+    "are",
+    "about",
+    "can",
+    "dangerous",
+    "for",
+    "from",
+    "give",
+    "how",
+    "in",
+    "is",
+    "its",
+    "mass",
+    "me",
+    "molar",
+    "molecular",
+    "name",
+    "of",
+    "on",
+    "properties",
+    "the",
+    "to",
+    "tell",
+    "weight",
+    "what",
+    "with",
 }
 
 
@@ -46,15 +66,75 @@ def _normalize_query(text: str) -> str:
     return f" {normalized} "
 
 
-def _extract_named_formulas(query: str) -> List[str]:
-    normalized_query = _normalize_query(query)
+def _candidate_name_phrases(query: str) -> List[str]:
+    normalized = _normalize_query(query).strip()
+    tokens = normalized.split()
+    if not tokens:
+        return []
+
+    filtered = [token for token in tokens if token not in NAME_RESOLUTION_STOPWORDS]
+    if not filtered:
+        filtered = tokens
+
+    phrases = []
+    seen = set()
+
+    def add_phrase(value: str):
+        phrase = value.strip()
+        if not phrase or phrase in seen:
+            return
+        seen.add(phrase)
+        phrases.append(phrase)
+
+    add_phrase(" ".join(filtered))
+
+    max_len = min(4, len(filtered))
+    for size in range(max_len, 0, -1):
+        for start in range(0, len(filtered) - size + 1):
+            add_phrase(" ".join(filtered[start:start + size]))
+            if len(phrases) >= 12:
+                return phrases
+
+    return phrases
+
+
+async def _resolve_formula_from_name(name: str, client: httpx.AsyncClient) -> str:
+    lowered = name.lower().strip()
+    if lowered in COMPOUND_ALIASES:
+        return COMPOUND_ALIASES[lowered]
+
+    encoded_name = quote(name, safe="")
+    url = PUBCHEM_NAME_TO_FORMULA.format(encoded_name)
+
+    try:
+        resp = await client.get(url)
+        if resp.status_code == 404:
+            return ""
+        resp.raise_for_status()
+        payload = resp.json()
+    except Exception:
+        return ""
+
+    properties = payload.get("PropertyTable", {}).get("Properties", [])
+    if not properties:
+        return ""
+
+    formula = properties[0].get("MolecularFormula", "")
+    return formula if isinstance(formula, str) else ""
+
+
+async def _extract_named_formulas(query: str, client: httpx.AsyncClient) -> List[str]:
     formulas = []
     seen = set()
-    for name, formula in COMPOUND_NAME_TO_FORMULA.items():
-        needle = f" {_normalize_query(name).strip()} "
-        if needle in normalized_query and formula not in seen:
+
+    for phrase in _candidate_name_phrases(query):
+        formula = await _resolve_formula_from_name(phrase, client)
+        if formula and formula not in seen:
             seen.add(formula)
             formulas.append(formula)
+        if len(formulas) >= 3:
+            break
+
     return formulas
 
 
@@ -65,18 +145,19 @@ def _symbols_signature(formula: str) -> str:
 
 async def search_ptable(query: str, max_results: int = 3) -> List[Dict]:
     """Search Ptable compounds endpoint for formulas found in user query."""
-    formulas = []
-    seen = set()
-    for formula in _extract_formulas(query) + _extract_named_formulas(query):
-        if formula not in seen:
-            seen.add(formula)
-            formulas.append(formula)
-
-    if not formulas:
-        return []
-
     results = []
     async with httpx.AsyncClient(timeout=20, follow_redirects=True) as client:
+        formulas = []
+        seen = set()
+        named_formulas = await _extract_named_formulas(query, client)
+        for formula in _extract_formulas(query) + named_formulas:
+            if formula not in seen:
+                seen.add(formula)
+                formulas.append(formula)
+
+        if not formulas:
+            return []
+
         for formula in formulas[:3]:
             signature = _symbols_signature(formula)
             if not signature:
