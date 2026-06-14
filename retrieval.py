@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Awaitable, Callable, Dict, List, Tuple
 
 from sources import search_arxiv, search_ptable, search_pubmed
@@ -48,6 +49,112 @@ SOURCE_DEFINITIONS = {
         search=search_ptable,
     ),
 }
+
+BASE_SOURCE_TRUST = {
+    "pubmed": 0.78,
+    "arxiv": 0.58,
+    "ptable": 0.48,
+}
+
+PRIORITY_JOURNALS = (
+    "nature",
+    "science",
+    "proc natl acad sci",
+    "n engl j med",
+    "lancet",
+)
+
+
+def _source_key(source: Dict) -> str:
+    return str(source.get("source", "")).strip().lower()
+
+
+def _parse_year(value: str) -> int | None:
+    if not value:
+        return None
+    digits = "".join(ch for ch in str(value) if ch.isdigit())
+    if len(digits) < 4:
+        return None
+    year = int(digits[:4])
+    now = datetime.now().year
+    if 1800 <= year <= now + 1:
+        return year
+    return None
+
+
+def _recency_component(source: Dict) -> float:
+    year = _parse_year(source.get("year", ""))
+    if year is None:
+        return 0.0
+    age = datetime.now().year - year
+    if age <= 2:
+        return 0.12
+    if age <= 5:
+        return 0.09
+    if age <= 10:
+        return 0.06
+    if age <= 20:
+        return 0.03
+    return 0.01
+
+
+def _metadata_component(source: Dict) -> float:
+    score = 0.0
+    abstract = str(source.get("abstract", "")).strip()
+    authors = source.get("authors") or []
+    doi = str(source.get("doi", "")).strip()
+    url = str(source.get("url", "")).strip()
+    journal = str(source.get("journal", "")).strip()
+
+    if len(abstract) >= 120:
+        score += 0.06
+    elif len(abstract) >= 40:
+        score += 0.03
+
+    if isinstance(authors, list) and authors:
+        score += 0.04
+
+    if doi:
+        score += 0.05
+
+    if url.startswith("http"):
+        score += 0.02
+
+    if journal:
+        score += 0.03
+
+    return score
+
+
+def _journal_component(source: Dict) -> float:
+    journal = str(source.get("journal", "")).lower()
+    if any(name in journal for name in PRIORITY_JOURNALS):
+        return 0.08
+    return 0.0
+
+
+def _compute_confidence(source: Dict) -> float:
+    source_key = _source_key(source)
+    base = BASE_SOURCE_TRUST.get(source_key, 0.45)
+    score = base + _recency_component(source) + _metadata_component(source) + _journal_component(source)
+    return max(0.0, min(1.0, score))
+
+
+def _rank_sources(sources: List[Dict]) -> List[Dict]:
+    ranked = []
+    for source in sources:
+        source_copy = dict(source)
+        source_copy["confidence_score"] = round(_compute_confidence(source_copy), 3)
+        ranked.append(source_copy)
+
+    ranked.sort(
+        key=lambda item: (
+            item.get("confidence_score", 0.0),
+            _parse_year(item.get("year", "")) or 0,
+        ),
+        reverse=True,
+    )
+    return ranked
 
 
 def get_source_definitions() -> Dict[str, SourceDefinition]:
@@ -108,4 +215,4 @@ async def search_all_sources(
             continue
         merged_sources.extend(result)
 
-    return merged_sources, source_errors
+    return _rank_sources(merged_sources), source_errors
