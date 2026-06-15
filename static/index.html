@@ -196,6 +196,12 @@
     .source-card .src-header {
       display: flex; align-items: flex-start; gap: 8px; margin-bottom: 4px;
     }
+    .source-card .title-wrap {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
     .badge {
       flex-shrink: 0;
       padding: 2px 8px; border-radius: 999px;
@@ -204,6 +210,29 @@
     .badge.pubmed { background: var(--badge-pubmed); color: #fff; }
     .badge.arxiv { background: var(--badge-arxiv); color: #000; }
     .badge.ptable { background: var(--badge-ptable); color: #06240f; }
+    .confidence-chip {
+      flex-shrink: 0;
+      padding: 2px 8px;
+      border-radius: 999px;
+      font-size: 10px;
+      font-weight: 600;
+      border: 1px solid transparent;
+    }
+    .confidence-chip.high {
+      color: #052e16;
+      background: #86efac;
+      border-color: #22c55e;
+    }
+    .confidence-chip.medium {
+      color: #422006;
+      background: #fde68a;
+      border-color: #f59e0b;
+    }
+    .confidence-chip.low {
+      color: #450a0a;
+      background: #fecaca;
+      border-color: #ef4444;
+    }
     .source-card .title { font-weight: 600; color: var(--text); line-height: 1.4; }
     .source-card .meta { color: var(--text-muted); margin-bottom: 6px; }
     .source-card .abstract { color: #9aa5b4; line-height: 1.5; }
@@ -516,6 +545,11 @@
       if (!sources || sources.length === 0) return '';
       const cards = sources.map((s, i) => {
         const badge = `<span class="badge ${escapeHtml(sourceKey(s.source))}" style="${sourceBadgeStyle(s.source)}">${escapeHtml(s.source)}</span>`;
+        const rawScore = Number(s.confidence_score);
+        const safeScore = Number.isFinite(rawScore) ? Math.max(0, Math.min(1, rawScore)) : null;
+        const confidenceClass = safeScore === null ? 'low' : safeScore >= 0.8 ? 'high' : safeScore >= 0.6 ? 'medium' : 'low';
+        const confidenceLabel = safeScore === null ? 'confidence n/a' : `confidence ${(safeScore * 100).toFixed(0)}%`;
+        const confidenceChip = `<span class="confidence-chip ${confidenceClass}">${escapeHtml(confidenceLabel)}</span>`;
         const authorsStr = s.authors && s.authors.length > 0
           ? escapeHtml(s.authors.slice(0, 3).join(', ') + (s.authors.length > 3 ? ' et al.' : ''))
           : 'Unknown authors';
@@ -525,7 +559,10 @@
           <div class="source-card">
             <div class="src-header">
               ${badge}
-              <div class="title">[${i+1}] ${escapeHtml(s.title)}</div>
+              <div class="title-wrap">
+                <div class="title">[${i+1}] ${escapeHtml(s.title)}</div>
+                ${confidenceChip}
+              </div>
             </div>
             <div class="meta">${escapeHtml(s.journal)}${s.year ? ' · ' + escapeHtml(s.year) : ''} · ${authorsStr}</div>
             ${abstract}

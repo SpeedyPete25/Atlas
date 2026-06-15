@@ -34,6 +34,7 @@ class Source(BaseModel):
     url: str
     doi: str
     source: str
+    confidence_score: float | None = None
 
 
 class ChatResponse(BaseModel):
