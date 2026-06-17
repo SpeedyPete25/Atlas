@@ -102,6 +102,23 @@ Retrieved items are ranked before generation using:
 
 This ranking improves evidence quality passed to the LLM.
 
+### Confidence Threshold Configuration
+
+You can configure confidence chip/ranking thresholds via environment variables:
+
+- `ATLAS_CONFIDENCE_HIGH`: score threshold for `high` confidence (default: `0.80`)
+- `ATLAS_CONFIDENCE_MEDIUM`: score threshold for `medium` confidence (default: `0.60`)
+
+Notes:
+- Values are clamped to the range `0.0` to `1.0`.
+- If `ATLAS_CONFIDENCE_MEDIUM` is greater than `ATLAS_CONFIDENCE_HIGH`, medium is automatically set equal to high.
+
+Example (Windows PowerShell):
+
+    $env:ATLAS_CONFIDENCE_HIGH="0.85"
+    $env:ATLAS_CONFIDENCE_MEDIUM="0.65"
+    python -m uvicorn main:app --reload
+
 ## Adding a New Verified Source
 
 1. Create a new module in sources, for example sources/crossref.py.

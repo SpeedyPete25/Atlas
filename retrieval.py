@@ -1,5 +1,6 @@
 from dataclasses import dataclass
 from datetime import datetime
+import os
 from typing import Awaitable, Callable, Dict, List, Tuple
 
 from sources import search_arxiv, search_ptable, search_pubmed
@@ -63,6 +64,28 @@ PRIORITY_JOURNALS = (
     "n engl j med",
     "lancet",
 )
+
+
+def _float_env(name: str, default: float) -> float:
+    value = os.getenv(name)
+    if value is None:
+        return default
+    try:
+        parsed = float(value)
+    except ValueError:
+        return default
+    return max(0.0, min(1.0, parsed))
+
+
+_confidence_high = _float_env("ATLAS_CONFIDENCE_HIGH", 0.80)
+_confidence_medium = _float_env("ATLAS_CONFIDENCE_MEDIUM", 0.60)
+if _confidence_medium > _confidence_high:
+    _confidence_medium = _confidence_high
+
+CONFIDENCE_THRESHOLDS = {
+    "high": _confidence_high,
+    "medium": _confidence_medium,
+}
 
 
 def _source_key(source: Dict) -> str:
@@ -140,11 +163,21 @@ def _compute_confidence(source: Dict) -> float:
     return max(0.0, min(1.0, score))
 
 
+def _confidence_level(score: float) -> str:
+    if score >= CONFIDENCE_THRESHOLDS["high"]:
+        return "high"
+    if score >= CONFIDENCE_THRESHOLDS["medium"]:
+        return "medium"
+    return "low"
+
+
 def _rank_sources(sources: List[Dict]) -> List[Dict]:
     ranked = []
     for source in sources:
         source_copy = dict(source)
-        source_copy["confidence_score"] = round(_compute_confidence(source_copy), 3)
+        score = round(_compute_confidence(source_copy), 3)
+        source_copy["confidence_score"] = score
+        source_copy["confidence_level"] = _confidence_level(score)
         ranked.append(source_copy)
 
     ranked.sort(
@@ -159,6 +192,10 @@ def _rank_sources(sources: List[Dict]) -> List[Dict]:
 
 def get_source_definitions() -> Dict[str, SourceDefinition]:
     return SOURCE_DEFINITIONS
+
+
+def get_confidence_thresholds() -> Dict[str, float]:
+    return CONFIDENCE_THRESHOLDS
 
 
 def get_default_source_limits() -> Dict[str, int]:

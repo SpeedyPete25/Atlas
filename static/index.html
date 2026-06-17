@@ -355,6 +355,7 @@
     const sourceControls = document.getElementById('source-controls');
     const welcomeSources = document.getElementById('welcome-sources');
     let availableSources = [];
+    let confidenceThresholds = { high: 0.8, medium: 0.6 };
 
     // Auto-resize textarea
     textarea.addEventListener('input', () => {
@@ -464,6 +465,17 @@
       try {
         const res = await fetch('/sources');
         const data = await res.json();
+        if (data.confidence_thresholds) {
+          const high = Number(data.confidence_thresholds.high);
+          const medium = Number(data.confidence_thresholds.medium);
+          confidenceThresholds = {
+            high: Number.isFinite(high) ? Math.max(0, Math.min(1, high)) : 0.8,
+            medium: Number.isFinite(medium) ? Math.max(0, Math.min(1, medium)) : 0.6,
+          };
+          if (confidenceThresholds.medium > confidenceThresholds.high) {
+            confidenceThresholds.medium = confidenceThresholds.high;
+          }
+        }
         renderSourceControls(data.sources || []);
       } catch (_) {
         renderSourceControls([]);
@@ -547,7 +559,13 @@
         const badge = `<span class="badge ${escapeHtml(sourceKey(s.source))}" style="${sourceBadgeStyle(s.source)}">${escapeHtml(s.source)}</span>`;
         const rawScore = Number(s.confidence_score);
         const safeScore = Number.isFinite(rawScore) ? Math.max(0, Math.min(1, rawScore)) : null;
-        const confidenceClass = safeScore === null ? 'low' : safeScore >= 0.8 ? 'high' : safeScore >= 0.6 ? 'medium' : 'low';
+        const confidenceClass = safeScore === null
+          ? 'low'
+          : safeScore >= confidenceThresholds.high
+          ? 'high'
+          : safeScore >= confidenceThresholds.medium
+          ? 'medium'
+          : 'low';
         const confidenceLabel = safeScore === null ? 'confidence n/a' : `confidence ${(safeScore * 100).toFixed(0)}%`;
         const confidenceChip = `<span class="confidence-chip ${confidenceClass}">${escapeHtml(confidenceLabel)}</span>`;
         const authorsStr = s.authors && s.authors.length > 0

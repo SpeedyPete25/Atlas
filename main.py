@@ -5,6 +5,7 @@ from pydantic import BaseModel, Field
 from typing import Dict, List
 
 from retrieval import (
+    get_confidence_thresholds,
     get_default_source_limits,
     get_source_definitions,
     normalize_source_limits,
@@ -35,6 +36,7 @@ class Source(BaseModel):
     doi: str
     source: str
     confidence_score: float | None = None
+    confidence_level: str | None = None
 
 
 class ChatResponse(BaseModel):
@@ -101,7 +103,8 @@ async def get_sources():
                 "default_max_results": source.default_max_results,
             }
             for source in definitions.values()
-        ]
+        ],
+        "confidence_thresholds": get_confidence_thresholds(),
     }
 
 
