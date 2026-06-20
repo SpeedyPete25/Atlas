@@ -2,6 +2,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
+import os
 from typing import Dict, List
 
 from retrieval import (
@@ -101,7 +102,47 @@ def _build_insufficient_evidence_response(
     )
 
 
+def _int_env(name: str, default: int) -> int:
+    value = os.getenv(name)
+    if value is None:
+        return default
+    try:
+        parsed = int(value)
+    except ValueError:
+        return default
+    return max(0, parsed)
+
+
+def _float_env(name: str, default: float) -> float:
+    value = os.getenv(name)
+    if value is None:
+        return default
+    try:
+        parsed = float(value)
+    except ValueError:
+        return default
+    return max(0.0, min(1.0, parsed))
+
+
+def get_evidence_gate_config() -> Dict[str, float | int]:
+    confidence = get_confidence_thresholds()
+    medium_default = float(confidence.get("medium", 0.6))
+
+    min_total_sources = _int_env("ATLAS_GATE_MIN_TOTAL_SOURCES", 2)
+    min_medium_or_higher_sources = _int_env("ATLAS_GATE_MIN_MEDIUM_OR_HIGHER_SOURCES", 1)
+    min_average_confidence = _float_env("ATLAS_GATE_MIN_AVERAGE_CONFIDENCE", medium_default)
+    contradiction_min_score = _float_env("ATLAS_GATE_CONTRADICTION_MIN_SCORE", medium_default)
+
+    return {
+        "min_total_sources": min_total_sources,
+        "min_medium_or_higher_sources": min_medium_or_higher_sources,
+        "min_average_confidence": min_average_confidence,
+        "contradiction_min_score": contradiction_min_score,
+    }
+
+
 def _evaluate_evidence_gate(sources: List[Dict]) -> str | None:
+    gate_config = get_evidence_gate_config()
     thresholds = get_confidence_thresholds()
     high_threshold = float(thresholds.get("high", 0.8))
     medium_threshold = float(thresholds.get("medium", 0.6))
@@ -112,11 +153,14 @@ def _evaluate_evidence_gate(sources: List[Dict]) -> str | None:
     medium_or_higher_count = sum(1 for score in scored if score >= medium_threshold)
     average_score = (sum(scored) / total) if total else 0.0
 
-    contradiction = _detect_contradiction(sources, min_score=medium_threshold)
+    contradiction = _detect_contradiction(
+        sources,
+        min_score=float(gate_config["contradiction_min_score"]),
+    )
     weak_evidence = (
-        total < 2
-        or medium_or_higher_count == 0
-        or average_score < medium_threshold
+        total < int(gate_config["min_total_sources"])
+        or medium_or_higher_count < int(gate_config["min_medium_or_higher_sources"])
+        or average_score < float(gate_config["min_average_confidence"])
     )
 
     if contradiction:
@@ -203,6 +247,7 @@ async def get_sources():
             for source in definitions.values()
         ],
         "confidence_thresholds": get_confidence_thresholds(),
+        "evidence_gate": get_evidence_gate_config(),
     }
 
 

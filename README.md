@@ -119,6 +119,29 @@ Example (Windows PowerShell):
     $env:ATLAS_CONFIDENCE_MEDIUM="0.65"
     python -m uvicorn main:app --reload
 
+### Evidence Gate Configuration
+
+Evidence gating decides whether Atlas should answer normally or return an `INSUFFICIENT_EVIDENCE` response.
+
+Configure gate strictness via environment variables:
+
+- `ATLAS_GATE_MIN_TOTAL_SOURCES`: minimum number of retrieved sources required (default: `2`)
+- `ATLAS_GATE_MIN_MEDIUM_OR_HIGHER_SOURCES`: minimum count of sources at or above medium confidence (default: `1`)
+- `ATLAS_GATE_MIN_AVERAGE_CONFIDENCE`: minimum average confidence score across retrieved sources (default: current medium threshold)
+- `ATLAS_GATE_CONTRADICTION_MIN_SCORE`: minimum confidence score for sources considered in contradiction checks (default: current medium threshold)
+
+Notes:
+- Confidence values are clamped to `0.0` to `1.0`.
+- Integer values are clamped to `>= 0`.
+
+Example (Windows PowerShell):
+
+    $env:ATLAS_GATE_MIN_TOTAL_SOURCES="3"
+    $env:ATLAS_GATE_MIN_MEDIUM_OR_HIGHER_SOURCES="2"
+    $env:ATLAS_GATE_MIN_AVERAGE_CONFIDENCE="0.7"
+    $env:ATLAS_GATE_CONTRADICTION_MIN_SCORE="0.65"
+    python -m uvicorn main:app --reload
+
 ## Adding a New Verified Source
 
 1. Create a new module in sources, for example sources/crossref.py.
