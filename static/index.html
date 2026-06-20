@@ -107,6 +107,22 @@
       color: var(--text-muted);
       margin-bottom: 2px;
     }
+    .policy-row {
+      width: 100%;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin: 4px 0 2px;
+    }
+    .policy-chip {
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      color: var(--text-muted);
+      border-radius: 999px;
+      padding: 3px 8px;
+      font-size: 11px;
+      line-height: 1.3;
+    }
     .source-chip {
       display: inline-flex;
       align-items: center;
@@ -338,6 +354,7 @@
   <div id="input-bar">
     <div class="source-controls" id="source-controls">
       <div class="source-controls-label">Enabled verified sources</div>
+      <div class="policy-row" id="policy-row"></div>
     </div>
     <div class="input-wrap">
       <textarea id="question" rows="1" placeholder="Ask a scientific question…" maxlength="1000"></textarea>
@@ -354,8 +371,15 @@
     const modelSelect = document.getElementById('model-select');
     const sourceControls = document.getElementById('source-controls');
     const welcomeSources = document.getElementById('welcome-sources');
+    const policyRow = document.getElementById('policy-row');
     let availableSources = [];
     let confidenceThresholds = { high: 0.8, medium: 0.6 };
+    let evidenceGate = {
+      min_total_sources: 2,
+      min_medium_or_higher_sources: 1,
+      min_average_confidence: 0.6,
+      contradiction_min_score: 0.6,
+    };
 
     // Auto-resize textarea
     textarea.addEventListener('input', () => {
@@ -406,10 +430,26 @@
     function renderSourceControls(sources) {
       availableSources = Array.isArray(sources) ? sources : [];
       welcomeSources.innerHTML = '';
+      policyRow.innerHTML = '';
 
       const label = sourceControls.querySelector('.source-controls-label');
+      const policy = sourceControls.querySelector('.policy-row');
       sourceControls.innerHTML = '';
       sourceControls.appendChild(label);
+      sourceControls.appendChild(policy);
+
+      const policyItems = [
+        `min sources: ${evidenceGate.min_total_sources}`,
+        `min medium+: ${evidenceGate.min_medium_or_higher_sources}`,
+        `min avg conf: ${(Number(evidenceGate.min_average_confidence) * 100).toFixed(0)}%`,
+        `contradiction cutoff: ${(Number(evidenceGate.contradiction_min_score) * 100).toFixed(0)}%`,
+      ];
+      policyItems.forEach(text => {
+        const chip = document.createElement('span');
+        chip.className = 'policy-chip';
+        chip.textContent = text;
+        policyRow.appendChild(chip);
+      });
 
       if (availableSources.length === 0) {
         welcomeSources.innerHTML = '<span class="src-tag">No sources available</span>';
@@ -475,6 +515,22 @@
           if (confidenceThresholds.medium > confidenceThresholds.high) {
             confidenceThresholds.medium = confidenceThresholds.high;
           }
+        }
+        if (data.evidence_gate) {
+          const toInt = (value, fallback) => {
+            const parsed = Number(value);
+            return Number.isFinite(parsed) ? Math.max(0, Math.round(parsed)) : fallback;
+          };
+          const toFloat = (value, fallback) => {
+            const parsed = Number(value);
+            return Number.isFinite(parsed) ? Math.max(0, Math.min(1, parsed)) : fallback;
+          };
+          evidenceGate = {
+            min_total_sources: toInt(data.evidence_gate.min_total_sources, evidenceGate.min_total_sources),
+            min_medium_or_higher_sources: toInt(data.evidence_gate.min_medium_or_higher_sources, evidenceGate.min_medium_or_higher_sources),
+            min_average_confidence: toFloat(data.evidence_gate.min_average_confidence, evidenceGate.min_average_confidence),
+            contradiction_min_score: toFloat(data.evidence_gate.contradiction_min_score, evidenceGate.contradiction_min_score),
+          };
         }
         renderSourceControls(data.sources || []);
       } catch (_) {
