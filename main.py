@@ -16,6 +16,14 @@ from llm import generate_answer, list_models
 app = FastAPI(title="Scientific Chatbot", version="1.0.0")
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
+CONTRADICTION_PAIRS = [
+    ("effective", "ineffective"),
+    ("benefit", "no significant"),
+    ("improves", "worsens"),
+    ("safe", "toxic"),
+    ("protective", "harmful"),
+]
+
 
 class ChatRequest(BaseModel):
     question: str = Field(..., min_length=3, max_length=1000)
@@ -42,6 +50,92 @@ class Source(BaseModel):
 class ChatResponse(BaseModel):
     answer: str
     sources: List[Source]
+
+
+def _score(source: Dict) -> float:
+    value = source.get("confidence_score", 0.0)
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError):
+        return 0.0
+    return max(0.0, min(1.0, parsed))
+
+
+def _detect_contradiction(sources: List[Dict], min_score: float) -> bool:
+    strong_texts = []
+    for source in sources:
+        if _score(source) < min_score:
+            continue
+        text = f"{source.get('title', '')} {source.get('abstract', '')}".lower()
+        strong_texts.append(text)
+
+    if len(strong_texts) < 2:
+        return False
+
+    for positive, negative in CONTRADICTION_PAIRS:
+        has_positive = any(positive in text for text in strong_texts)
+        has_negative = any(negative in text for text in strong_texts)
+        if has_positive and has_negative:
+            return True
+
+    return False
+
+
+def _build_insufficient_evidence_response(
+    reason: str,
+    total_sources: int,
+    high_count: int,
+    medium_or_higher_count: int,
+) -> str:
+    return (
+        "INSUFFICIENT_EVIDENCE\n"
+        f"reason: {reason}\n"
+        "summary:\n"
+        f"- total_sources: {total_sources}\n"
+        f"- high_confidence_sources: {high_count}\n"
+        f"- medium_or_higher_sources: {medium_or_higher_count}\n"
+        "next_steps:\n"
+        "- refine your question with more specific terms (population, intervention, outcome)\n"
+        "- enable more sources or increase per-source limits\n"
+        "- ask for a narrower claim that can be verified with current evidence"
+    )
+
+
+def _evaluate_evidence_gate(sources: List[Dict]) -> str | None:
+    thresholds = get_confidence_thresholds()
+    high_threshold = float(thresholds.get("high", 0.8))
+    medium_threshold = float(thresholds.get("medium", 0.6))
+
+    scored = [_score(source) for source in sources]
+    total = len(scored)
+    high_count = sum(1 for score in scored if score >= high_threshold)
+    medium_or_higher_count = sum(1 for score in scored if score >= medium_threshold)
+    average_score = (sum(scored) / total) if total else 0.0
+
+    contradiction = _detect_contradiction(sources, min_score=medium_threshold)
+    weak_evidence = (
+        total < 2
+        or medium_or_higher_count == 0
+        or average_score < medium_threshold
+    )
+
+    if contradiction:
+        return _build_insufficient_evidence_response(
+            reason="retrieved sources contain contradictory claims",
+            total_sources=total,
+            high_count=high_count,
+            medium_or_higher_count=medium_or_higher_count,
+        )
+
+    if weak_evidence:
+        return _build_insufficient_evidence_response(
+            reason="retrieved evidence quality is too weak for a reliable answer",
+            total_sources=total,
+            high_count=high_count,
+            medium_or_higher_count=medium_or_higher_count,
+        )
+
+    return None
 
 
 @app.get("/", include_in_schema=False)
@@ -80,6 +174,10 @@ async def chat(request: ChatRequest):
             ),
             sources=[],
         )
+
+    gated_response = _evaluate_evidence_gate(sources)
+    if gated_response is not None:
+        return ChatResponse(answer=gated_response, sources=sources)
 
     try:
         answer = await generate_answer(question, sources, model=request.model)
