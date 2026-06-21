@@ -1,8 +1,11 @@
 import httpx
+import re
 from typing import List, Dict
 
 OLLAMA_CHAT_URL = "http://localhost:11434/api/chat"
 OLLAMA_TAGS_URL = "http://localhost:11434/api/tags"
+
+_CITATION_BLOCK_RE = re.compile(r"\[([^\[\]]*\d[^\[\]]*)\]")
 
 
 def _build_system_prompt() -> str:
@@ -41,6 +44,40 @@ def _build_user_message(question: str, sources: List[Dict]) -> str:
     )
 
 
+def _verify_and_fix_citations(answer: str, total_sources: int) -> str:
+    """Keep only citations that point to existing source indices.
+
+    Supported citation format: [1], [1, 2], [2,3,4].
+    Invalid indices are dropped; empty citation blocks are removed.
+    """
+    if total_sources <= 0:
+        return answer
+
+    def replace_block(match: re.Match) -> str:
+        raw_block = match.group(1)
+        values = re.findall(r"\d+", raw_block)
+
+        valid = []
+        seen = set()
+        for value in values:
+            index = int(value)
+            if 1 <= index <= total_sources and index not in seen:
+                seen.add(index)
+                valid.append(index)
+
+        if not valid:
+            return ""
+
+        joined = ", ".join(str(index) for index in valid)
+        return f"[{joined}]"
+
+    fixed = _CITATION_BLOCK_RE.sub(replace_block, answer)
+    fixed = re.sub(r"\s{2,}", " ", fixed)
+    fixed = re.sub(r"\s+([,.;:!?])", r"\1", fixed)
+    fixed = re.sub(r"\n{3,}", "\n\n", fixed)
+    return fixed.strip()
+
+
 async def generate_answer(question: str, sources: List[Dict], model: str = "llama3") -> str:
     """Send context + question to Ollama and return the model's response."""
     messages = [
@@ -58,7 +95,8 @@ async def generate_answer(question: str, sources: List[Dict], model: str = "llam
             },
         })
         resp.raise_for_status()
-        return resp.json()["message"]["content"]
+        raw_answer = resp.json()["message"]["content"]
+        return _verify_and_fix_citations(raw_answer, total_sources=len(sources))
 
 
 async def list_models() -> List[str]:
