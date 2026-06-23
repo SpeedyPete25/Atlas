@@ -2,7 +2,10 @@ from fastapi import FastAPI, HTTPException
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
+import json
+import logging
 import os
+import re
 from typing import Dict, List
 
 from retrieval import (
@@ -16,6 +19,12 @@ from llm import generate_answer, list_models
 
 app = FastAPI(title="Scientific Chatbot", version="1.0.0")
 app.mount("/static", StaticFiles(directory="static"), name="static")
+
+AUDIT_LOGGER = logging.getLogger("atlas.audit")
+if not logging.getLogger().handlers:
+    logging.basicConfig(level=logging.INFO)
+
+_CITATION_BLOCK_RE = re.compile(r"\[(\d+(?:\s*,\s*\d+)*)\]")
 
 CONTRADICTION_PAIRS = [
     ("effective", "ineffective"),
@@ -51,6 +60,69 @@ class Source(BaseModel):
 class ChatResponse(BaseModel):
     answer: str
     sources: List[Source]
+
+
+def _audit_log(event: str, **fields) -> None:
+    payload = {
+        "event": event,
+        "component": "chat",
+        **fields,
+    }
+    AUDIT_LOGGER.info(json.dumps(payload, ensure_ascii=True, default=str))
+
+
+def _selected_source_keys(source_limits: Dict[str, int]) -> List[str]:
+    keys = []
+    for key, value in source_limits.items():
+        try:
+            enabled = int(value) > 0
+        except (TypeError, ValueError):
+            enabled = False
+        if enabled:
+            keys.append(key)
+    return sorted(keys)
+
+
+def _source_counts(sources: List[Dict]) -> Dict[str, int]:
+    counts: Dict[str, int] = {}
+    for source in sources:
+        name = str(source.get("source", "unknown"))
+        counts[name] = counts.get(name, 0) + 1
+    return counts
+
+
+def _extract_citation_indices(answer: str, max_index: int) -> List[int]:
+    indices = []
+    seen = set()
+    for block in _CITATION_BLOCK_RE.findall(answer):
+        for token in re.findall(r"\d+", block):
+            idx = int(token)
+            if 1 <= idx <= max_index and idx not in seen:
+                seen.add(idx)
+                indices.append(idx)
+    return indices
+
+
+def _chosen_references(citation_indices: List[int], sources: List[Dict]) -> List[Dict]:
+    references = []
+    for idx in citation_indices:
+        if not (1 <= idx <= len(sources)):
+            continue
+        source = sources[idx - 1]
+        references.append({
+            "index": idx,
+            "source": source.get("source", ""),
+            "title": source.get("title", ""),
+            "url": source.get("url", ""),
+        })
+    return references
+
+
+def _gate_reason(gated_response: str) -> str:
+    for line in gated_response.splitlines():
+        if line.lower().startswith("reason:"):
+            return line.split(":", 1)[1].strip()
+    return "insufficient evidence"
 
 
 def _score(source: Dict) -> float:
@@ -203,14 +275,47 @@ async def chat(request: ChatRequest):
         **request.source_limits,
         **legacy_overrides,
     })
+    selected_sources = _selected_source_keys(source_limits)
+
+    _audit_log(
+        "chat_request",
+        question=question,
+        model=request.model,
+        selected_sources=selected_sources,
+        source_limits=source_limits,
+    )
+
     sources, source_errors = await search_all_sources(question, source_limits)
+
+    _audit_log(
+        "retrieval_result",
+        question=question,
+        selected_sources=selected_sources,
+        source_limits=source_limits,
+        total_sources=len(sources),
+        retrieved_source_counts=_source_counts(sources),
+        source_errors=source_errors,
+    )
 
     if not sources:
         if source_errors:
+            _audit_log(
+                "chat_no_sources_error",
+                question=question,
+                selected_sources=selected_sources,
+                source_limits=source_limits,
+                source_errors=source_errors,
+            )
             raise HTTPException(
                 status_code=502,
                 detail="; ".join(source_errors),
             )
+        _audit_log(
+            "chat_no_sources",
+            question=question,
+            selected_sources=selected_sources,
+            source_limits=source_limits,
+        )
         return ChatResponse(
             answer=(
                 "No relevant scientific literature was found for your question. "
@@ -221,6 +326,14 @@ async def chat(request: ChatRequest):
 
     gated_response = _evaluate_evidence_gate(sources)
     if gated_response is not None:
+        _audit_log(
+            "chat_gated",
+            question=question,
+            selected_sources=selected_sources,
+            source_limits=source_limits,
+            gate_reason=_gate_reason(gated_response),
+            chosen_references=[],
+        )
         return ChatResponse(answer=gated_response, sources=sources)
 
     try:
@@ -230,6 +343,17 @@ async def chat(request: ChatRequest):
             status_code=503,
             detail=f"Could not reach Ollama. Is it running? ({e})",
         )
+
+    citation_indices = _extract_citation_indices(answer, max_index=len(sources))
+    chosen_references = _chosen_references(citation_indices, sources)
+    _audit_log(
+        "chat_answer",
+        question=question,
+        selected_sources=selected_sources,
+        source_limits=source_limits,
+        citation_indices=citation_indices,
+        chosen_references=chosen_references,
+    )
 
     return ChatResponse(answer=answer, sources=sources)
 
