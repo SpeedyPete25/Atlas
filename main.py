@@ -62,12 +62,43 @@ class ChatResponse(BaseModel):
     sources: List[Source]
 
 
+def get_audit_log_mode() -> str:
+    mode = os.getenv("ATLAS_AUDIT_LOG_MODE", "full").strip().lower()
+    if mode in {"off", "basic", "full"}:
+        return mode
+    return "full"
+
+
+def _to_basic_audit_payload(payload: Dict) -> Dict:
+    basic = {}
+    for key, value in payload.items():
+        if key == "question":
+            basic["question_length"] = len(str(value))
+        elif key == "chosen_references":
+            basic["chosen_reference_count"] = len(value) if isinstance(value, list) else 0
+        elif key == "source_errors":
+            basic["source_error_count"] = len(value) if isinstance(value, list) else 0
+        elif key == "citation_indices":
+            basic["citation_count"] = len(value) if isinstance(value, list) else 0
+        else:
+            basic[key] = value
+    return basic
+
+
 def _audit_log(event: str, **fields) -> None:
+    mode = get_audit_log_mode()
+    if mode == "off":
+        return
+
     payload = {
         "event": event,
         "component": "chat",
         **fields,
     }
+
+    if mode == "basic":
+        payload = _to_basic_audit_payload(payload)
+
     AUDIT_LOGGER.info(json.dumps(payload, ensure_ascii=True, default=str))
 
 
@@ -372,6 +403,9 @@ async def get_sources():
         ],
         "confidence_thresholds": get_confidence_thresholds(),
         "evidence_gate": get_evidence_gate_config(),
+        "audit_logging": {
+            "mode": get_audit_log_mode(),
+        },
     }
 
 

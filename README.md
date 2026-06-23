@@ -142,6 +142,20 @@ Example (Windows PowerShell):
     $env:ATLAS_GATE_CONTRADICTION_MIN_SCORE="0.65"
     python -m uvicorn main:app --reload
 
+### Audit Logging Configuration
+
+Use a single environment variable to control audit log verbosity:
+
+- `ATLAS_AUDIT_LOG_MODE` with values:
+    - `full` (default): full JSON payloads, including question text and chosen references
+    - `basic`: reduced payload detail (for example, question length and reference counts)
+    - `off`: disables audit event logging
+
+Example (Windows PowerShell):
+
+        $env:ATLAS_AUDIT_LOG_MODE="basic"
+        python -m uvicorn main:app --reload
+
 ## Adding a New Verified Source
 
 1. Create a new module in sources, for example sources/crossref.py.
