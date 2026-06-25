@@ -2,6 +2,13 @@ import httpx
 import re
 from typing import List, Dict
 
+"""LLM integration and citation post-processing.
+
+This module builds a constrained evidence prompt, sends it to Ollama, and
+post-processes model output so citation indices only reference retrieved
+sources.
+"""
+
 OLLAMA_CHAT_URL = "http://localhost:11434/api/chat"
 OLLAMA_TAGS_URL = "http://localhost:11434/api/tags"
 
@@ -9,6 +16,7 @@ _CITATION_BLOCK_RE = re.compile(r"\[([^\[\]]*\d[^\[\]]*)\]")
 
 
 def _build_system_prompt() -> str:
+    """Return strict behavior instructions for evidence-grounded generation."""
     return (
         "You are a rigorous scientific assistant. Your role is to answer questions "
         "ONLY using the peer-reviewed and verified scientific sources provided to you. "
@@ -24,6 +32,7 @@ def _build_system_prompt() -> str:
 
 
 def _build_user_message(question: str, sources: List[Dict]) -> str:
+    """Build retrieval context with numbered references consumed by the model."""
     context_parts = []
     for i, src in enumerate(sources, 1):
         authors_str = ", ".join(src.get("authors", [])) or "Unknown authors"
@@ -79,7 +88,16 @@ def _verify_and_fix_citations(answer: str, total_sources: int) -> str:
 
 
 async def generate_answer(question: str, sources: List[Dict], model: str = "llama3") -> str:
-    """Send context + question to Ollama and return the model's response."""
+    """Generate an answer from Ollama and sanitize citation references.
+
+    Args:
+        question: User prompt text.
+        sources: Retrieved evidence records already scored/ranked upstream.
+        model: Ollama model name.
+
+    Returns:
+        Model answer with citation blocks normalized to existing source indices.
+    """
     messages = [
         {"role": "system", "content": _build_system_prompt()},
         {"role": "user", "content": _build_user_message(question, sources)},
@@ -96,6 +114,7 @@ async def generate_answer(question: str, sources: List[Dict], model: str = "llam
         })
         resp.raise_for_status()
         raw_answer = resp.json()["message"]["content"]
+        # Prevent dangling citations such as [99] when only a few sources exist.
         return _verify_and_fix_citations(raw_answer, total_sources=len(sources))
 
 
