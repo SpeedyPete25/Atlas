@@ -17,6 +17,12 @@ from retrieval import (
 )
 from llm import generate_answer, list_models
 
+"""Atlas API orchestration layer.
+
+This module coordinates retrieval, evidence gating, answer generation, and audit
+logging for the scientific chatbot endpoints.
+"""
+
 app = FastAPI(title="Scientific Chatbot", version="1.0.0")
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
@@ -36,6 +42,8 @@ CONTRADICTION_PAIRS = [
 
 
 class ChatRequest(BaseModel):
+    """Input payload for /chat with optional per-source result overrides."""
+
     question: str = Field(..., min_length=3, max_length=1000)
     model: str = Field(default="llama3")
     source_limits: Dict[str, int] = Field(default_factory=get_default_source_limits)
@@ -45,6 +53,8 @@ class ChatRequest(BaseModel):
 
 
 class Source(BaseModel):
+    """Normalized source item returned to clients in /chat responses."""
+
     title: str
     abstract: str
     authors: List[str]
@@ -58,11 +68,15 @@ class Source(BaseModel):
 
 
 class ChatResponse(BaseModel):
+    """Response payload containing the generated answer and retrieved sources."""
+
     answer: str
     sources: List[Source]
 
 
 def get_audit_log_mode() -> str:
+    """Return audit verbosity mode from env, defaulting invalid values to full."""
+
     mode = os.getenv("ATLAS_AUDIT_LOG_MODE", "full").strip().lower()
     if mode in {"off", "basic", "full"}:
         return mode
@@ -70,6 +84,8 @@ def get_audit_log_mode() -> str:
 
 
 def _to_basic_audit_payload(payload: Dict) -> Dict:
+    """Downsample sensitive/large audit fields when mode is basic."""
+
     basic = {}
     for key, value in payload.items():
         if key == "question":
@@ -86,6 +102,8 @@ def _to_basic_audit_payload(payload: Dict) -> Dict:
 
 
 def _audit_log(event: str, **fields) -> None:
+    """Emit structured JSON audit events honoring configured verbosity mode."""
+
     mode = get_audit_log_mode()
     if mode == "off":
         return
@@ -103,6 +121,8 @@ def _audit_log(event: str, **fields) -> None:
 
 
 def _selected_source_keys(source_limits: Dict[str, int]) -> List[str]:
+    """Return sorted source keys enabled by positive max-result limits."""
+
     keys = []
     for key, value in source_limits.items():
         try:
@@ -115,6 +135,8 @@ def _selected_source_keys(source_limits: Dict[str, int]) -> List[str]:
 
 
 def _source_counts(sources: List[Dict]) -> Dict[str, int]:
+    """Count retrieved records grouped by source name."""
+
     counts: Dict[str, int] = {}
     for source in sources:
         name = str(source.get("source", "unknown"))
@@ -123,6 +145,8 @@ def _source_counts(sources: List[Dict]) -> Dict[str, int]:
 
 
 def _extract_citation_indices(answer: str, max_index: int) -> List[int]:
+    """Extract unique, in-range citation indices from answer text."""
+
     indices = []
     seen = set()
     for block in _CITATION_BLOCK_RE.findall(answer):
@@ -135,6 +159,8 @@ def _extract_citation_indices(answer: str, max_index: int) -> List[int]:
 
 
 def _chosen_references(citation_indices: List[int], sources: List[Dict]) -> List[Dict]:
+    """Resolve cited indices to lightweight source reference metadata."""
+
     references = []
     for idx in citation_indices:
         if not (1 <= idx <= len(sources)):
@@ -150,6 +176,8 @@ def _chosen_references(citation_indices: List[int], sources: List[Dict]) -> List
 
 
 def _gate_reason(gated_response: str) -> str:
+    """Parse reason text from a structured gated response payload."""
+
     for line in gated_response.splitlines():
         if line.lower().startswith("reason:"):
             return line.split(":", 1)[1].strip()
@@ -157,6 +185,8 @@ def _gate_reason(gated_response: str) -> str:
 
 
 def _score(source: Dict) -> float:
+    """Read and clamp source confidence score into the [0.0, 1.0] interval."""
+
     value = source.get("confidence_score", 0.0)
     try:
         parsed = float(value)
@@ -166,6 +196,8 @@ def _score(source: Dict) -> float:
 
 
 def _detect_contradiction(sources: List[Dict], min_score: float) -> bool:
+    """Detect simple contradictory claim pairs across stronger sources."""
+
     strong_texts = []
     for source in sources:
         if _score(source) < min_score:
@@ -191,6 +223,8 @@ def _build_insufficient_evidence_response(
     high_count: int,
     medium_or_higher_count: int,
 ) -> str:
+    """Create a deterministic insufficient-evidence message for clients."""
+
     return (
         "INSUFFICIENT_EVIDENCE\n"
         f"reason: {reason}\n"
@@ -206,6 +240,8 @@ def _build_insufficient_evidence_response(
 
 
 def _int_env(name: str, default: int) -> int:
+    """Read non-negative integer env vars with safe fallback."""
+
     value = os.getenv(name)
     if value is None:
         return default
@@ -217,6 +253,8 @@ def _int_env(name: str, default: int) -> int:
 
 
 def _float_env(name: str, default: float) -> float:
+    """Read and clamp float env vars to [0.0, 1.0] with safe fallback."""
+
     value = os.getenv(name)
     if value is None:
         return default
@@ -228,6 +266,8 @@ def _float_env(name: str, default: float) -> float:
 
 
 def get_evidence_gate_config() -> Dict[str, float | int]:
+    """Return effective evidence-gate policy using env overrides and defaults."""
+
     confidence = get_confidence_thresholds()
     medium_default = float(confidence.get("medium", 0.6))
 
@@ -245,6 +285,8 @@ def get_evidence_gate_config() -> Dict[str, float | int]:
 
 
 def _evaluate_evidence_gate(sources: List[Dict]) -> str | None:
+    """Return a gated response string when evidence is insufficient, else None."""
+
     gate_config = get_evidence_gate_config()
     thresholds = get_confidence_thresholds()
     high_threshold = float(thresholds.get("high", 0.8))
@@ -287,11 +329,15 @@ def _evaluate_evidence_gate(sources: List[Dict]) -> str | None:
 
 @app.get("/", include_in_schema=False)
 async def root():
+    """Serve the single-page frontend."""
+
     return FileResponse("static/index.html")
 
 
 @app.post("/chat", response_model=ChatResponse)
 async def chat(request: ChatRequest):
+    """Handle scientific Q&A: retrieve, gate, generate, and audit the request."""
+
     question = request.question.strip()
     legacy_overrides = {
         key: value
@@ -391,6 +437,8 @@ async def chat(request: ChatRequest):
 
 @app.get("/sources")
 async def get_sources():
+    """Expose source catalog and active policy configuration for the frontend."""
+
     definitions = get_source_definitions()
     return {
         "sources": [
@@ -418,4 +466,6 @@ async def get_models():
 
 @app.get("/health")
 async def health():
+    """Simple health endpoint for readiness/liveness checks."""
+
     return {"status": "ok"}

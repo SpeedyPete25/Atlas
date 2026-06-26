@@ -54,6 +54,11 @@ Open: http://127.0.0.1:8000
 - `GET /sources` source metadata + active confidence/gate/audit policy
 - `POST /chat` retrieve + gate + generate
 
+## Documentation Map
+
+- `README.md` (this file): setup, runtime behavior, configuration
+- `docs/architecture.md`: component architecture, data contracts, audit events
+
 ### `/chat` Example
 
 ```json
@@ -64,6 +69,54 @@ Open: http://127.0.0.1:8000
         "pubmed": 4,
         "arxiv": 2,
         "ptable": 2
+    }
+}
+```
+
+### `/chat` Response Modes
+
+Atlas can return one of three practical response modes:
+
+1. Normal answer
+   - Evidence gate passes.
+   - `answer` contains generated text with citations.
+   - `sources` contains retrieved records used for context.
+
+2. Gated response
+   - Evidence gate fails due to weak or contradictory evidence.
+   - `answer` begins with `INSUFFICIENT_EVIDENCE` and includes a reason + next steps.
+   - `sources` still contains retrieved records for transparency.
+
+3. No-source response
+   - No records retrieved and no upstream source error.
+   - `answer` explains that no relevant literature was found.
+   - `sources` is an empty list.
+
+Error behavior:
+- If all retrieval fails with source errors, `/chat` returns HTTP `502`.
+- If Ollama generation fails after successful retrieval, `/chat` returns HTTP `503`.
+
+### `/sources` Example
+
+```json
+{
+    "sources": [
+        {"key": "pubmed", "label": "PubMed", "default_max_results": 5},
+        {"key": "arxiv", "label": "arXiv", "default_max_results": 3},
+        {"key": "ptable", "label": "Ptable", "default_max_results": 2}
+    ],
+    "confidence_thresholds": {
+        "high": 0.8,
+        "medium": 0.6
+    },
+    "evidence_gate": {
+        "min_total_sources": 2,
+        "min_medium_or_higher_sources": 1,
+        "min_average_confidence": 0.6,
+        "contradiction_min_score": 0.6
+    },
+    "audit_logging": {
+        "mode": "full"
     }
 }
 ```
@@ -149,3 +202,4 @@ ollama list
 ```
 
 - If responses are gated often, increase source limits or relax gate thresholds.
+- If you need deeper operational detail, see `docs/architecture.md`.
