@@ -1,13 +1,23 @@
 import xml.etree.ElementTree as ET
-from typing import Dict, List
+from typing import List
 
 import httpx
+from .types import SourceResults
+
+"""arXiv source adapter.
+
+This module queries the arXiv Atom API and normalizes entries into the common
+Atlas source record shape.
+"""
 
 ARXIV_SEARCH = "https://export.arxiv.org/api/query"
 
 
-async def search_arxiv(query: str, max_results: int = 4) -> List[Dict]:
-    """Search arXiv and return a list of paper metadata dicts."""
+async def search_arxiv(query: str, max_results: int = 4) -> SourceResults:
+    """Search arXiv and return Atlas-formatted source records.
+
+    Redirects are followed to handle API endpoint behavior robustly.
+    """
     async with httpx.AsyncClient(timeout=20, follow_redirects=True) as client:
         resp = await client.get(ARXIV_SEARCH, params={
             "search_query": f"all:{query}",
@@ -19,7 +29,12 @@ async def search_arxiv(query: str, max_results: int = 4) -> List[Dict]:
         return _parse_arxiv_xml(resp.text)
 
 
-def _parse_arxiv_xml(xml_text: str) -> List[Dict]:
+def _parse_arxiv_xml(xml_text: str) -> SourceResults:
+    """Parse Atom XML from arXiv into Atlas source dictionaries.
+
+    Invalid entries are skipped; malformed XML returns an empty list.
+    """
+
     results = []
     ns = {"atom": "http://www.w3.org/2005/Atom"}
     try:

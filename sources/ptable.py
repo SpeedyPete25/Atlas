@@ -1,8 +1,16 @@
 import re
-from typing import Dict, List
+from typing import List
 from urllib.parse import quote
 
 import httpx
+from .types import SourceResults
+
+"""Ptable-based chemistry source adapter.
+
+This module resolves formulas from direct chemical notation and name-based
+lookup (PubChem), then queries Ptable compounds and normalizes results into the
+Atlas source contract.
+"""
 
 PTABLE_COMPOUNDS = "https://ptable.com/JSON/compounds/"
 PUBCHEM_NAME_TO_FORMULA = (
@@ -51,6 +59,8 @@ NAME_RESOLUTION_STOPWORDS = {
 
 
 def _extract_formulas(query: str) -> List[str]:
+    """Extract formula-like tokens (for example Na2CO3) from free-text queries."""
+
     formulas = []
     seen = set()
     for match in FORMULA_PATTERN.findall(query):
@@ -61,12 +71,16 @@ def _extract_formulas(query: str) -> List[str]:
 
 
 def _normalize_query(text: str) -> str:
+    """Normalize free text for phrase extraction and name-resolution heuristics."""
+
     normalized = re.sub(r"[^a-z0-9\s-]", " ", text.lower())
     normalized = re.sub(r"\s+", " ", normalized).strip()
     return f" {normalized} "
 
 
 def _candidate_name_phrases(query: str) -> List[str]:
+    """Generate likely compound name phrases from a question string."""
+
     normalized = _normalize_query(query).strip()
     tokens = normalized.split()
     if not tokens:
@@ -99,6 +113,8 @@ def _candidate_name_phrases(query: str) -> List[str]:
 
 
 async def _resolve_formula_from_name(name: str, client: httpx.AsyncClient) -> str:
+    """Resolve a compound name to molecular formula using aliases then PubChem."""
+
     lowered = name.lower().strip()
     if lowered in COMPOUND_ALIASES:
         return COMPOUND_ALIASES[lowered]
@@ -124,6 +140,8 @@ async def _resolve_formula_from_name(name: str, client: httpx.AsyncClient) -> st
 
 
 async def _extract_named_formulas(query: str, client: httpx.AsyncClient) -> List[str]:
+    """Resolve up to three unique formulas from candidate name phrases."""
+
     formulas = []
     seen = set()
 
@@ -139,13 +157,20 @@ async def _extract_named_formulas(query: str, client: httpx.AsyncClient) -> List
 
 
 def _symbols_signature(formula: str) -> str:
+    """Build a symbol signature used by Ptable formula lookup endpoint."""
+
     symbols = sorted(set(SYMBOL_PATTERN.findall(formula)))
     return "".join(symbols)
 
 
-async def search_ptable(query: str, max_results: int = 3) -> List[Dict]:
-    """Search Ptable compounds endpoint for formulas found in user query."""
-    results = []
+async def search_ptable(query: str, max_results: int = 3) -> SourceResults:
+    """Search Ptable compounds based on formulas extracted/resolved from query.
+
+    The function returns Atlas-formatted source records and may include a linked
+    Wikipedia reference when available from Ptable metadata.
+    """
+
+    results: SourceResults = []
     async with httpx.AsyncClient(timeout=20, follow_redirects=True) as client:
         formulas = []
         seen = set()

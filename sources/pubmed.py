@@ -1,14 +1,25 @@
 import xml.etree.ElementTree as ET
-from typing import Dict, List
+from typing import List
 
 import httpx
+from .types import SourceResults
+
+"""PubMed/NCBI source adapter.
+
+This module queries NCBI E-utilities, then normalizes XML article metadata into
+the common Atlas source record shape.
+"""
 
 PUBMED_SEARCH = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi"
 PUBMED_FETCH = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi"
 
 
-async def search_pubmed(query: str, max_results: int = 5) -> List[Dict]:
-    """Search PubMed/NCBI and return a list of paper metadata dicts."""
+async def search_pubmed(query: str, max_results: int = 5) -> SourceResults:
+    """Search PubMed and return source records in Atlas contract format.
+
+    Returns an empty list when no IDs are found or parsing fails.
+    Network failures are surfaced to the caller.
+    """
     async with httpx.AsyncClient(timeout=20) as client:
         search_resp = await client.get(PUBMED_SEARCH, params={
             "db": "pubmed",
@@ -32,7 +43,13 @@ async def search_pubmed(query: str, max_results: int = 5) -> List[Dict]:
         return _parse_pubmed_xml(fetch_resp.text)
 
 
-def _parse_pubmed_xml(xml_text: str) -> List[Dict]:
+def _parse_pubmed_xml(xml_text: str) -> SourceResults:
+    """Parse PubMed XML payload into Atlas source dictionaries.
+
+    Best-effort parsing is used: malformed records are skipped and parsing
+    errors return an empty list.
+    """
+
     results = []
     try:
         root = ET.fromstring(xml_text)
