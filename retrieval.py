@@ -1,13 +1,13 @@
 from dataclasses import dataclass
 from datetime import datetime
 import os
-from typing import Awaitable, Callable, Dict, List, Tuple
+from typing import Awaitable, Callable, Dict, cast
 
-from sources import search_arxiv, search_ptable, search_pubmed
+from sources import SourceRecord, SourceResults, search_arxiv, search_ptable, search_pubmed
 
 
 # Contributor guide for new sources:
-# - Implement an async function with signature: search_<source>(query: str, max_results: int) -> List[Dict]
+# - Implement an async function with signature: search_<source>(query: str, max_results: int) -> SourceResults
 # - Return a list of dictionaries with exactly these keys so the API and UI can render them consistently:
 #   {
 #       "title": str,
@@ -27,7 +27,7 @@ class SourceDefinition:
     key: str
     label: str
     default_max_results: int
-    search: Callable[[str, int], Awaitable[List[Dict]]]
+    search: Callable[[str, int], Awaitable[SourceResults]]
 
 
 SOURCE_DEFINITIONS = {
@@ -88,7 +88,7 @@ CONFIDENCE_THRESHOLDS = {
 }
 
 
-def _source_key(source: Dict) -> str:
+def _source_key(source: SourceRecord) -> str:
     return str(source.get("source", "")).strip().lower()
 
 
@@ -105,7 +105,7 @@ def _parse_year(value: str) -> int | None:
     return None
 
 
-def _recency_component(source: Dict) -> float:
+def _recency_component(source: SourceRecord) -> float:
     year = _parse_year(source.get("year", ""))
     if year is None:
         return 0.0
@@ -121,7 +121,7 @@ def _recency_component(source: Dict) -> float:
     return 0.01
 
 
-def _metadata_component(source: Dict) -> float:
+def _metadata_component(source: SourceRecord) -> float:
     score = 0.0
     abstract = str(source.get("abstract", "")).strip()
     authors = source.get("authors") or []
@@ -149,14 +149,14 @@ def _metadata_component(source: Dict) -> float:
     return score
 
 
-def _journal_component(source: Dict) -> float:
+def _journal_component(source: SourceRecord) -> float:
     journal = str(source.get("journal", "")).lower()
     if any(name in journal for name in PRIORITY_JOURNALS):
         return 0.08
     return 0.0
 
 
-def _compute_confidence(source: Dict) -> float:
+def _compute_confidence(source: SourceRecord) -> float:
     source_key = _source_key(source)
     base = BASE_SOURCE_TRUST.get(source_key, 0.45)
     score = base + _recency_component(source) + _metadata_component(source) + _journal_component(source)
@@ -171,10 +171,10 @@ def _confidence_level(score: float) -> str:
     return "low"
 
 
-def _rank_sources(sources: List[Dict]) -> List[Dict]:
-    ranked = []
+def _rank_sources(sources: SourceResults) -> SourceResults:
+    ranked: SourceResults = []
     for source in sources:
-        source_copy = dict(source)
+        source_copy = cast(SourceRecord, dict(source))
         score = round(_compute_confidence(source_copy), 3)
         source_copy["confidence_score"] = score
         source_copy["confidence_level"] = _confidence_level(score)
@@ -226,7 +226,7 @@ def normalize_source_limits(overrides: Dict[str, int] | None = None) -> Dict[str
 async def search_all_sources(
     query: str,
     source_limits: Dict[str, int] | None = None,
-) -> Tuple[List[Dict], List[str]]:
+) -> tuple[SourceResults, list[str]]:
     limits = normalize_source_limits(source_limits)
     enabled_sources = [
         source
@@ -244,8 +244,8 @@ async def search_all_sources(
         return_exceptions=True,
     )
 
-    merged_sources = []
-    source_errors = []
+    merged_sources: SourceResults = []
+    source_errors: list[str] = []
     for source, result in zip(enabled_sources, results):
         if isinstance(result, Exception):
             source_errors.append(f"{source.label} retrieval failed: {result}")

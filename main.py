@@ -7,6 +7,7 @@ import logging
 import os
 import re
 from typing import Dict, List
+from sources import SourceRecord, SourceResults
 
 from retrieval import (
     get_confidence_thresholds,
@@ -134,7 +135,7 @@ def _selected_source_keys(source_limits: Dict[str, int]) -> List[str]:
     return sorted(keys)
 
 
-def _source_counts(sources: List[Dict]) -> Dict[str, int]:
+def _source_counts(sources: SourceResults) -> Dict[str, int]:
     """Count retrieved records grouped by source name."""
 
     counts: Dict[str, int] = {}
@@ -158,7 +159,7 @@ def _extract_citation_indices(answer: str, max_index: int) -> List[int]:
     return indices
 
 
-def _chosen_references(citation_indices: List[int], sources: List[Dict]) -> List[Dict]:
+def _chosen_references(citation_indices: List[int], sources: SourceResults) -> List[Dict]:
     """Resolve cited indices to lightweight source reference metadata."""
 
     references = []
@@ -184,7 +185,7 @@ def _gate_reason(gated_response: str) -> str:
     return "insufficient evidence"
 
 
-def _score(source: Dict) -> float:
+def _score(source: SourceRecord) -> float:
     """Read and clamp source confidence score into the [0.0, 1.0] interval."""
 
     value = source.get("confidence_score", 0.0)
@@ -195,7 +196,7 @@ def _score(source: Dict) -> float:
     return max(0.0, min(1.0, parsed))
 
 
-def _detect_contradiction(sources: List[Dict], min_score: float) -> bool:
+def _detect_contradiction(sources: SourceResults, min_score: float) -> bool:
     """Detect simple contradictory claim pairs across stronger sources."""
 
     strong_texts = []
@@ -284,7 +285,7 @@ def get_evidence_gate_config() -> Dict[str, float | int]:
     }
 
 
-def _evaluate_evidence_gate(sources: List[Dict]) -> str | None:
+def _evaluate_evidence_gate(sources: SourceResults) -> str | None:
     """Return a gated response string when evidence is insufficient, else None."""
 
     gate_config = get_evidence_gate_config()
