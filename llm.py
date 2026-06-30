@@ -1,6 +1,8 @@
 import httpx
 import re
-from typing import List, Dict
+from typing import List
+
+from sources.types import SourceResults
 
 """LLM integration and citation post-processing.
 
@@ -31,7 +33,7 @@ def _build_system_prompt() -> str:
     )
 
 
-def _build_user_message(question: str, sources: List[Dict]) -> str:
+def _build_user_message(question: str, sources: SourceResults) -> str:
     """Build retrieval context with numbered references consumed by the model."""
     context_parts = []
     for i, src in enumerate(sources, 1):
@@ -87,7 +89,7 @@ def _verify_and_fix_citations(answer: str, total_sources: int) -> str:
     return fixed.strip()
 
 
-async def generate_answer(question: str, sources: List[Dict], model: str = "llama3") -> str:
+async def generate_answer(question: str, sources: SourceResults, model: str = "llama3") -> str:
     """Generate an answer from Ollama and sanitize citation references.
 
     Args:
